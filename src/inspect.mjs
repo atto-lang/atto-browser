@@ -11,6 +11,9 @@ export function inspectWasmBytes(input,{maxModuleBytes=1048576,maxMemoryPages=32
  else if(ArrayBuffer.isView(input))bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
  else throw new TypeError("expected a Wasm ArrayBuffer or typed array");
  if(bytes.byteLength>maxModuleBytes)throw new Error("Wasm module exceeds maximum byte size");
+ // Snapshot any supplied view before inspecting; never validate bytes that can
+ // change between admission and WebAssembly.Module compilation (TOCTOU).
+ bytes=Uint8Array.from(bytes);
  const fail=message=>{throw new Error("Wasm admission denied: "+message)};
  if(bytes.length<8||bytes[0]!==0||bytes[1]!==97||bytes[2]!==115||bytes[3]!==109||
     bytes[4]!==1||bytes[5]!==0||bytes[6]!==0||bytes[7]!==0)fail("invalid core module header");
