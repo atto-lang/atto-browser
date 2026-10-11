@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./loader": "./src/loader.mjs"
+    "./loader": "./src/loader.mjs",
+    "./owned-actor": "./src/owned-actor-host.mjs"
   },
   "engines": {
     "node": ">=22"
