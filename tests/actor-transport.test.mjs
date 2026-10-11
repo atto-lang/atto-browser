@@ -66,3 +66,63 @@ test("forged worker receipt triggers supervisor CONTROL failure",async()=>{
  assert.equal(reported,1);
  assert.equal(terminated,true);
 });
+
+test("byte-budget reservations bound concurrent DATA even when slot count is high",async()=>{
+ const factory=()=>({
+  addEventListener(){},removeEventListener(){},postMessage(){},terminate(){}
+ });
+ const actor=createActorMessageTransport({...spec,capacity:100,
+  maxFrameBytes:1048576,maxReservedBytes:1048576,workerFactory:factory});
+ const first=actor.send(["held",1n]);
+ await assert.rejects(actor.send(["also-held",2n]),/mailbox full/);
+ await first;
+ assert.equal(actor.pending,1);
+ await assert.rejects(actor.stop(),/cancelled/);
+});
+test("stop promptly rejects pending admission, never claiming acceptance",async()=>{
+ const factory=()=>({
+  addEventListener(){},removeEventListener(){},postMessage(){},terminate(){}
+ });
+ const actor=createActorMessageTransport({...spec,workerFactory:factory,timeoutMs:2000});
+ const inFlight=actor.send(["pending",7n]);
+ const complete=actor.stop();
+ await assert.rejects(inFlight,/cancelled|stopped/);
+ await assert.rejects(complete,/cancelled/);
+ assert.equal(actor.pending,0);
+});
+test("invalid frame and total-byte budgets fail before starting a Worker",()=>{
+ let created=false;
+ const factory=()=>{created=true;throw Error("unexpected worker allocation")};
+ for(const options of [
+  {maxFrameBytes:63},{maxFrameBytes:1048577},
+  {maxFrameBytes:1024,maxReservedBytes:1023},
+  {maxFrameBytes:1024,maxReservedBytes:67108865}
+ ]){
+  assert.throws(()=>createActorMessageTransport({...spec,workerFactory:factory,...options}),/budget/);
+ }
+ assert.equal(created,false);
+});
+test("admission protocol delivers immutable FIFO tickets across concurrent sends",async()=>{
+ const seen=[];
+ let onMessage;
+ const factory=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-v2-init")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-v2-ready"}}));
+   if(msg.kind==="oreslang-v2-data"){
+    seen.push(msg.id);
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-v2-receipt",id:msg.id,ok:true}}));
+   }
+   if(msg.kind==="oreslang-v2-control")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-v2-stopped"}}));
+  },
+  terminate(){}
+ });
+ const actor=createActorMessageTransport({...spec,workerFactory:factory,capacity:4});
+ const first=actor.send(["one",1n]),second=actor.send(["two",2n]),third=actor.send(["three",3n]);
+ await Promise.all([first,second,third]);
+ await actor.drain();
+ assert.deepEqual(seen,[1,2,3]);
+});
