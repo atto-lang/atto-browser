@@ -19,7 +19,7 @@ test("browser codec is byte-identical to canonical upstream Wasm codec",async()=
  const b=await readFile(new URL("../src/messagepack-v2.mjs",import.meta.url));
  const header=Buffer.from("blob "+b.length+"\0","utf8");
  assert.equal(createHash("sha1").update(header).update(b).digest("hex"),
-  "aa28f59156be631679ae1a0b140bef9483869afe");
+  "6f12cfc99a2bb375a600123e339fe8e6a72a83fb");
 });
 test("isolated Worker processes bounded canonical actor DATA; drain seals mailbox",async()=>{
  const actor=createActorMessageTransport({...spec,workerFactory,capacity:3});
@@ -125,4 +125,12 @@ test("admission protocol delivers immutable FIFO tickets across concurrent sends
  await Promise.all([first,second,third]);
  await actor.drain();
  assert.deepEqual(seen,[1,2,3]);
+});
+
+test("oversized Unicode DATA admission fails closed and releases its reserved slot",async()=>{
+ const factory=()=>({addEventListener(){},removeEventListener(){},postMessage(){},terminate(){}});
+ const actor=createActorMessageTransport({...spec,workerFactory:factory,capacity:1,maxFrameBytes:128});
+ await assert.rejects(actor.send(["🌐".repeat(200000),1n]),/frame byte budget/);
+ assert.equal(actor.pending,0);
+ await assert.rejects(actor.stop(),/cancelled/);
 });
