@@ -6,11 +6,15 @@
 import {encodeActorMessageV2} from "./messagepack-v2.mjs";
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
 export function createActorMessageTransport({
- schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic
+ schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic,
+ maxFrameBytes=1048576,maxReservedBytes=4194304
 }={}){
  if(typeof schemaId!=="string"||typeof descriptor!=="string")fail("schema required");
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>4096)fail("invalid capacity");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid deadline");
+ if(!Number.isSafeInteger(maxFrameBytes)||maxFrameBytes<64||maxFrameBytes>1048576)fail("invalid frame byte budget");
+ if(!Number.isSafeInteger(maxReservedBytes)||maxReservedBytes<maxFrameBytes||maxReservedBytes>67108864)
+  fail("invalid total reserved byte budget");
  const create=workerFactory||(()=>{
   if(typeof Worker!=="function")fail("dedicated Web Worker unavailable");
   return new Worker(new URL("./actor-message-worker.mjs",import.meta.url),{type:"module"});
@@ -34,7 +38,11 @@ export function createActorMessageTransport({
  };
  const complete=(error,notifySupervisor=true)=>{
   if(finished)return;
-  finished=true;sealed=true;queue.length=0;active=null;
+  finished=true;sealed=true;
+  // Cancel every pending serializer immediately; no rejected actor may leave
+  // unresolved admission futures waiting on untrusted crypto providers.
+  for(const item of queue)item.abort?.(error||Error("actor stopped"));
+  queue.length=0;active=null;pending=0;
   cleanup();
   if(error){if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}doneReject(error)}
   else doneResolve();
@@ -44,6 +52,9 @@ export function createActorMessageTransport({
  function pump(){
   if(finished||!ready||active!==null)return;
   if(queue.length){
+   // Admission slots are ordered at send() call, not completion of async
+   // SHA-256. A faster later serialization cannot overtake an earlier send.
+   if(queue[0].frame===null)return;
    const item=queue.shift();active=item.id;
    try{worker.postMessage({kind:"oreslang-v2-data",id:item.id,frame:item.frame});arm()}
    catch{fatal(Error("actor DATA transport failure"))}
@@ -71,17 +82,38 @@ export function createActorMessageTransport({
  return Object.freeze({
   async send(value){
    if(sealed||finished)fail("mailbox closed");
-   if(pending>=capacity)fail("mailbox full");
-   // Reserve before async hashing, including in-flight and queued DATA slots.
+   // Budget pessimistically reserves the whole maximum encoded frame BEFORE
+   // hashing, including the active turn and every queued/preparing message.
+   // Bounded-count mailboxes alone allow capacity * 1MiB memory exhaustion.
+   if(pending>=capacity||(pending+1)*maxFrameBytes>maxReservedBytes)
+    fail("mailbox full (count or reserved byte budget)");
    pending++;
+   const item={id:++seq,frame:null,abort:null};
+   queue.push(item);
+   let timer;
+   const cancelled=new Promise((_,reject)=>{item.abort=reject});
    try{
-    const frame=await encodeActorMessageV2({schemaId,descriptor,value});
+    const admissionDeadline=new Promise((_,reject)=>{
+     timer=setTimeout(()=>{
+      const err=Error("actor DATA admission deadline exceeded");
+      fatal(err);reject(err);
+     },timeoutMs);
+    });
+    const frame=await Promise.race([
+     encodeActorMessageV2({schemaId,descriptor,value,maxBytes:maxFrameBytes}),
+     cancelled,admissionDeadline
+    ]);
     if(finished)fail("actor stopped during message admission");
-    queue.push({id:++seq,frame});
+    item.frame=frame;
     pump();
     if(finished)fail("worker rejected message admission");
     return true; // admitted, not necessarily processed
-   }catch(error){if(!finished)pending--;pump();throw error}
+   }catch(error){
+    if(!finished){pending--;const pos=queue.indexOf(item);if(pos>=0)queue.splice(pos,1)}
+    pump();throw error
+   }finally{
+    clearTimeout(timer);item.abort=null;
+   }
   },
   drain(){sealed=true;pump();return done},
   stop(){complete(Error("actor cancelled"),false);return done},
