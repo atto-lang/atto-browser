@@ -32,11 +32,11 @@ export function createActorMessageTransport({
    try{worker.removeEventListener(kind,cb)}catch{}
   try{const x=worker.terminate();if(x&&typeof x.catch==="function")x.catch(()=>{})}catch{}
  };
- const complete=error=>{
+ const complete=(error,notifySupervisor=true)=>{
   if(finished)return;
   finished=true;sealed=true;queue.length=0;active=null;
   cleanup();
-  if(error){try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}doneReject(error)}
+  if(error){if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}doneReject(error)}
   else doneResolve();
  };
  const fatal=error=>complete(error instanceof Error?error:Error("isolated actor Worker failed"));
@@ -84,7 +84,7 @@ export function createActorMessageTransport({
    }catch(error){if(!finished)pending--;pump();throw error}
   },
   drain(){sealed=true;pump();return done},
-  stop(){fatal(Error("actor cancelled"));return done},
+  stop(){complete(Error("actor cancelled"),false);return done},
   get_done(){return done},
   get pending(){return pending},
   get sealed(){return sealed}
