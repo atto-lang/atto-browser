@@ -43,8 +43,11 @@ export async function loadOreslangWasm(bytes,{
    // Enforcement must happen *inside the host function*, even if guest
    // code calls initialization exports to manipulate its own capability bits.
    if(!clockRequested||!grantedCapabilities.includes("clock"))throw new Error("clock capability denied");
+   const value=host.clockMs();
+   if(typeof value!=="number"||!Number.isFinite(value)||value<0)
+    throw new TypeError("clock provider must return finite, nonnegative milliseconds");
    clockCalls++;
-   return host.clockMs();
+   return value;
   }
  }};
  const instance=new WebAssembly.Instance(module,importsObject);
