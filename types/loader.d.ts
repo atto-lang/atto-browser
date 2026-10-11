@@ -4,6 +4,10 @@ export interface OreslangBrowserOptions {
   host?: { clockMs?: () => number };
   /** Defaults to true; false is for testing foreign bare wasm modules only. */
   requireRuntimeABI?: boolean;
+  /** Byte-size limit (default 1 MiB). */
+  maxModuleBytes?: number;
+  /** Required explicit maximum linear-memory pages (default 32 x 64 KiB). */
+  maxMemoryPages?: number;
 }
 export interface OreslangBrowserResult {
   readonly instance: WebAssembly.Instance;
@@ -11,6 +15,6 @@ export interface OreslangBrowserResult {
   readonly hostClockCalls: number;
 }
 export declare function loadOreslangWasm(
-  bytes: ArrayBuffer | ArrayBufferView | WebAssembly.Module,
+  bytes: ArrayBuffer | ArrayBufferView,
   options?: OreslangBrowserOptions
 ): Promise<OreslangBrowserResult>;
