@@ -72,3 +72,11 @@ test("invalid version, malformed wasm and impossible memory policies rejected",(
  assert.throws(()=>inspectWasmBytes(bytes,{maxMemoryPages:0}),/invalid maximum/);
  assert.throws(()=>inspectWasmBytes(bytes,{maxModuleBytes:0}),/invalid maximum/);
 });
+
+test("clock provider cannot smuggle negative or nonfinite time into Wasm",async()=>{
+ for(const bad of [NaN,Infinity,-1,"200"]){
+  const rt=await loadOreslangWasm(bytes,{...config,host:{clockMs:()=>bad}});
+  assert.throws(()=>rt.instance.exports.run_clock(),/finite, nonnegative/);
+  assert.equal(rt.hostClockCalls,0);
+ }
+});
