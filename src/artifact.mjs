@@ -4,7 +4,13 @@ import {assertCoreI64Entry} from "./abi.mjs";
 
 const hex64=x=>typeof x==="string"&&/^[0-9a-f]{64}$/.test(x);
 const shape=(x,names)=>x&&typeof x==="object"&&!Array.isArray(x)&&Object.keys(x).every(k=>names.includes(k));
-function checkManifest(m){
+function checkManifest(original){
+ // Capture caller-supplied manifest bytes before the first await. Otherwise
+ // changing wasmSha256, entry, or memory after validation can change what
+ // the loader admits (manifest TOCTOU), even with immutable Wasm bytes.
+ let m;
+ try { m=JSON.parse(JSON.stringify(original)); }
+ catch { throw new Error("invalid browser core Wasm manifest serialization"); }
  if(!shape(m,["schemaVersion","artifactType","target","environment","backend","entry","wasmSha256","wasmBytes","requiredCapabilities","imports","memory","producer"])||
     m.schemaVersion!==1||m.artifactType!=="oreslang.core-wasm.i64-v1"||
     m.target!=="wasm32"||m.backend!=="wasm"||m.environment!=="browser")
@@ -22,7 +28,11 @@ function checkManifest(m){
  if(!shape(m.producer,["compilerSha256","sourceSha256","llvmIrSha256"])||
     !["compilerSha256","sourceSha256","llvmIrSha256"].every(k=>hex64(m.producer[k])))
   throw new Error("invalid producer provenance");
- return m;
+ return Object.freeze({...m,
+  imports:Object.freeze(m.imports),
+  requiredCapabilities:Object.freeze(m.requiredCapabilities),
+  memory:Object.freeze(m.memory),
+  producer:Object.freeze(m.producer)});
 }
 async function digest(bytes){
  const subtle=globalThis.crypto?.subtle;
@@ -46,8 +56,6 @@ export async function loadVerifiedCoreGuest(rawBytes,manifest,{maxModuleBytes=10
  if(WebAssembly.Module.imports(module).length!==0)throw new Error("core Wasm guest imports forbidden");
  if(!WebAssembly.Module.exports(module).some(x=>x.name===m.entry&&x.kind==="function"))
   throw new Error("core Wasm entry export missing");
- // Prevent a valid-but-wrong signature from being presented as i64-v1.
- // This is static admission: never execute the untrusted guest to guess ABI.
  assertCoreI64Entry(checked.bytes,m.entry);
  const {instance}=await loadOreslangWasm(checked.bytes,{
   requestedCapabilities:[],grantedCapabilities:[],
