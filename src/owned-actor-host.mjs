@@ -61,14 +61,27 @@ export function createOwnedActorWorker({
    return;
   }
   const entry=outstanding.get(data.id);
-  outstanding.delete(data.id);clearTimeout(entry.timer);
+  if(entry.verifying){
+   cancelAll(new Error("duplicate actor Worker response"));
+   return;
+  }
+  entry.verifying=true;
   if(!data.ok){
+   outstanding.delete(data.id);clearTimeout(entry.timer);
    entry.reject(new Error("actor delivery rejected"));
    return;
   }
+  // A response remains pending until the owned bytes have been verified and
+  // decoded. close() or deadline during WebCrypto validation must still win.
   Promise.resolve().then(()=>decodeMessage(snapped,data.bytes,{maxBytes})).then(
-   entry.resolve,
-   error=>{entry.reject(error);cancelAll(new Error("invalid owned actor reply envelope"))}
+   reply=>{
+    if(closed)return;
+    outstanding.delete(data.id);clearTimeout(entry.timer);entry.resolve(reply);
+   },
+   ()=>{
+    if(closed)return;
+    cancelAll(new Error("invalid owned actor reply envelope"));
+   }
   );
  };
  const request=async(message)=>{
