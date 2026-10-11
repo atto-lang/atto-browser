@@ -19,7 +19,7 @@ export function createOwnedActorWorker({
   if(typeof Worker!=="function")fail("Web Worker unavailable");
   return new Worker(new URL("./owned-actor-worker.mjs",import.meta.url),{type:"module"});
  });
- let worker,ready=false,closed=false,nextId=1;
+ let worker,ready=false,closed=false,nextId=1,transmit=Promise.resolve();
  const outstanding=new Map();
  let initResolve,initReject,readyTimeout;
  const cancelAll=error=>{
@@ -82,13 +82,20 @@ export function createOwnedActorWorker({
   const result=new Promise((yes,no)=>{resolve=yes;reject=no});
   const entry={resolve,reject,timer:undefined};
   outstanding.set(id,entry);
-  try{
-   const bytes=await encodeMessage(snapped,message,{maxBytes});
+  // Serialize immediately so a caller mutation after request() cannot
+  // change payload bytes. Then preserve admission order across asynchronous
+  // WebCrypto SHA-256 work: the Worker requires strictly increasing IDs.
+  const encoded=encodeMessage(snapped,message,{maxBytes});
+  encoded.catch(()=>{});
+  const posted=transmit.then(async()=>{
+   const bytes=await encoded;
    if(closed)throw Error("actor closed");
    entry.timer=setTimeout(()=>cancelAll(new Error("actor Worker deadline exceeded")),timeoutMs);
    // No transfer list: ownership is copied across the isolated Worker.
    worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
-  }catch(error){
+  });
+  transmit=posted.catch(()=>{});
+  try{await posted;}catch(error){
    clearTimeout(entry.timer);
    outstanding.delete(id);
    reject(error);
