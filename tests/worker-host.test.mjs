@@ -92,3 +92,69 @@ test("invalid resource ceilings and missing isolation denied",async()=>{
   wasmBytes:wasm,manifest:artifact,workerFactory:()=>({})
  }),/dedicated isolated Worker/);
 });
+
+
+test("pre-aborted signal refuses admission without spawning a Worker",async()=>{
+ const controller=new AbortController();controller.abort();
+ let created=0;
+ await assert.rejects(runVerifiedCoreGuestInWorker({
+  wasmBytes:wasm,manifest:artifact,signal:controller.signal,
+  workerFactory:()=>{created++;throw Error("must not spawn");}
+ }),/worker aborted/);
+ assert.equal(created,0);
+});
+test("abort during Worker factory setup terminates without posting guest bytes",async()=>{
+ const controller=new AbortController();
+ let terminated=0,posted=0;
+ await assert.rejects(runVerifiedCoreGuestInWorker({
+  wasmBytes:wasm,manifest:artifact,signal:controller.signal,
+  workerFactory:()=>{
+   controller.abort();
+   return {addEventListener(){},removeEventListener(){},
+    postMessage(){posted++},terminate(){terminated++}};
+  }
+ }),/worker aborted/);
+ assert.equal(posted,0);assert.equal(terminated,1);
+});
+test("abort after posting cancels a pending Worker and removes listeners",async()=>{
+ const controller=new AbortController();
+ const listeners=new Map();
+ let terminated=0,posted=0;
+ const workerFactory=()=>({
+  addEventListener(k,cb){listeners.set(k,cb)},
+  removeEventListener(k){listeners.delete(k)},
+  postMessage(){posted++;queueMicrotask(()=>controller.abort())},
+  terminate(){terminated++}
+ });
+ await assert.rejects(runVerifiedCoreGuestInWorker({
+  wasmBytes:wasm,manifest:artifact,signal:controller.signal,
+  workerFactory,timeoutMs:1000
+ }),/worker aborted/);
+ assert.equal(posted,1);assert.equal(terminated,1);assert.equal(listeners.size,0);
+});
+test("abort after verified completion cannot terminate twice",async()=>{
+ const controller=new AbortController();
+ let terminated=0;
+ const workerFactory=()=>{
+  let onMessage;
+  return {
+   addEventListener(k,cb){if(k==="message")onMessage=cb},
+   removeEventListener(){},
+   postMessage(){
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-core-result-v1",ok:true,value:"42"}}));
+   },
+   terminate(){terminated++}
+  };
+ };
+ const value=await runVerifiedCoreGuestInWorker({
+  wasmBytes:wasm,manifest:artifact,signal:controller.signal,workerFactory
+ });
+ assert.equal(value,42n);
+ controller.abort();
+ assert.equal(terminated,1);
+});
+test("malformed cancellation token fails before spawning Worker",()=>{
+ assert.throws(()=>runVerifiedCoreGuestInWorker({
+  wasmBytes:wasm,manifest:artifact,signal:{aborted:false}
+ }),/AbortSignal/);
+});
