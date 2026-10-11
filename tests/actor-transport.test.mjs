@@ -134,3 +134,14 @@ test("oversized Unicode DATA admission fails closed and releases its reserved sl
  assert.equal(actor.pending,0);
  await assert.rejects(actor.stop(),/cancelled/);
 });
+
+test("invalid Worker factory adapters terminate already allocated carriers",()=>{
+ let terminated=0;
+ const factory=()=>({
+  postMessage(){},addEventListener(){},
+  // Deliberately missing removeEventListener; a worker was still allocated.
+  terminate(){terminated++;return Promise.resolve()}
+ });
+ assert.throws(()=>createActorMessageTransport({...spec,workerFactory:factory}),/trusted dedicated Worker required/);
+ assert.equal(terminated,1);
+});
