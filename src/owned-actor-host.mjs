@@ -93,6 +93,10 @@ export function createOwnedActorWorker({
   // Reserve capacity synchronously, before any WebCrypto await.
   let resolve,reject;
   const result=new Promise((yes,no)=>{resolve=yes;reject=no});
+  // close() can reject this reserved promise before the async encoder has
+  // posted it and before request() returns it. Observe it immediately to
+  // avoid a transient unhandled rejection; callers still receive rejection.
+  result.catch(()=>{});
   const entry={resolve,reject,timer:undefined};
   outstanding.set(id,entry);
   // Serialize immediately so a caller mutation after request() cannot
