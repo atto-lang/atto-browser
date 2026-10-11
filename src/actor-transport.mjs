@@ -20,7 +20,12 @@ export function createActorMessageTransport({
   return new Worker(new URL("./actor-message-worker.mjs",import.meta.url),{type:"module"});
  });
  const worker=create();
- if(!worker||["postMessage","addEventListener","removeEventListener","terminate"].some(x=>typeof worker[x]!=="function"))fail("trusted dedicated Worker required");
+ if(!worker||["postMessage","addEventListener","removeEventListener","terminate"].some(x=>typeof worker[x]!=="function")){
+  // A broken factory may already have allocated a live OS Worker before
+  // returning an incomplete adapter. Revoke it rather than leaking a carrier.
+  try{const termination=worker?.terminate?.();termination?.catch?.(()=>{})}catch{}
+  fail("trusted dedicated Worker required");
+ }
  let pending=0,ready=false,active=null,sealed=false,stopping=false,finished=false,seq=0,deadline;
  const queue=[];
  let doneResolve,doneReject;
