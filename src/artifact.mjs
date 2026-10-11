@@ -1,5 +1,6 @@
 import {inspectWasmBytes} from "./inspect.mjs";
 import {loadOreslangWasm} from "./loader.mjs";
+import {assertCoreI64Entry} from "./abi.mjs";
 
 const hex64=x=>typeof x==="string"&&/^[0-9a-f]{64}$/.test(x);
 const shape=(x,names)=>x&&typeof x==="object"&&!Array.isArray(x)&&Object.keys(x).every(k=>names.includes(k));
@@ -45,6 +46,9 @@ export async function loadVerifiedCoreGuest(rawBytes,manifest,{maxModuleBytes=10
  if(WebAssembly.Module.imports(module).length!==0)throw new Error("core Wasm guest imports forbidden");
  if(!WebAssembly.Module.exports(module).some(x=>x.name===m.entry&&x.kind==="function"))
   throw new Error("core Wasm entry export missing");
+ // Prevent a valid-but-wrong signature from being presented as i64-v1.
+ // This is static admission: never execute the untrusted guest to guess ABI.
+ assertCoreI64Entry(checked.bytes,m.entry);
  const {instance}=await loadOreslangWasm(checked.bytes,{
   requestedCapabilities:[],grantedCapabilities:[],
   requireRuntimeABI:false,maxModuleBytes,maxMemoryPages
