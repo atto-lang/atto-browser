@@ -34,12 +34,15 @@ test("isolated Worker processes bounded canonical actor DATA; drain seals mailbo
 });
 test("mailbox reserves full capacity before async hashing and rejects overload",async()=>{
  const worker=()=>({addEventListener(){},removeEventListener(){},postMessage(){},terminate(){}});
- const a=createActorMessageTransport({...spec,workerFactory:worker,capacity:1,timeoutMs:500});
+ let supervisorPanic=0;
+ const a=createActorMessageTransport({...spec,workerFactory:worker,capacity:1,timeoutMs:500,
+  onSupervisorPanic(){supervisorPanic++}});
  const first=a.send(["first",1n]);
  await assert.rejects(a.send(["too many",2n]),/mailbox full/);
  await first; // admission can succeed before runtime has acknowledged readiness
  await assert.rejects(a.stop(),/cancelled/);
  assert.equal(a.sealed,true);
+ assert.equal(supervisorPanic,0);
 });
 test("malformed data is denied before admission without leaking queue capacity",async()=>{
  const a=createActorMessageTransport({...spec,workerFactory,capacity:1});
