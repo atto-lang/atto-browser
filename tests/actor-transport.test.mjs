@@ -387,3 +387,35 @@ test("oversized or empty Worker INIT metadata fails before Worker allocation",()
  }
  assert.equal(started,0);
 });
+
+test("canonical malformed INIT contracts fail before allocating a carrier",()=>{
+ let created=0;
+ const workerFactory=()=>{created++;throw Error("Worker must not be allocated")};
+ for(const contract of [
+  {schemaId:"x".repeat(257),descriptor:"I"},
+  {schemaId:"invalid schema",descriptor:"I"},
+  {schemaId:"🌐",descriptor:"I"},
+  {schemaId:"x",descriptor:"T[S,]"},
+  {schemaId:"x",descriptor:"A[]"},
+  {schemaId:"x",descriptor:"T[S,I]junk"},
+  {schemaId:"x",descriptor:"A[".repeat(65)+"I"+"]".repeat(65)},
+  {schemaId:"x",descriptor:"a".repeat(4097)}
+ ]){
+  assert.throws(()=>createActorMessageTransport({...contract,workerFactory}),
+   /invalid schema or descriptor/);
+ }
+ assert.equal(created,0);
+});
+
+test("canonical descriptor validation admits valid nested shape before Worker startup",async()=>{
+ let initialized,terminated=0;
+ const workerFactory=()=>({
+  addEventListener(){},removeEventListener(){},
+  postMessage(msg){if(msg.kind==="oreslang-v2-init")initialized=msg},
+  terminate(){terminated++}
+ });
+ const actor=createActorMessageTransport({schemaId:"x",descriptor:"T[A[I],FL[B,S]]",workerFactory});
+ assert.deepEqual(initialized,{kind:"oreslang-v2-init",schemaId:"x",descriptor:"T[A[I],FL[B,S]]"});
+ await assert.rejects(actor.stop(),/cancelled/);
+ assert.equal(terminated,1);
+});
