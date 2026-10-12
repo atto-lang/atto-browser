@@ -64,3 +64,14 @@ test("null prototypes stay data-only; traversal rejects deeply nested manifests"
  const hostile={...valid(),unexpected:nested};
  assert.throws(()=>snapshotCoreManifest(hostile),/serialization/);
 });
+
+test("direct artifact loader and Worker host reject shared-backed Wasm byte views",async()=>{
+ if(typeof SharedArrayBuffer==="undefined")return;
+ const shared=new SharedArrayBuffer(wasm.byteLength);
+ const view=new Uint8Array(shared);view.set(wasm);
+ const sample=valid();
+ await assert.rejects(loadVerifiedCoreGuest(view,sample),/shared Wasm input memory/);
+ assert.throws(()=>runVerifiedCoreGuestInWorker({
+   wasmBytes:view,manifest:sample,workerFactory:()=>{throw Error("must not spawn")}
+ }),/shared memory not admitted/);
+});
