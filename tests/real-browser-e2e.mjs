@@ -42,7 +42,26 @@ try{
    const page=await browser.newPage();
    await page.goto(origin,{waitUntil:"load"});
    page.setDefaultTimeout(30000);
-   const result=await page.evaluate(async()=>{
+   // Playwright's evaluate() is NOT governed by setDefaultTimeout().
+   // A broken/never-settling browser-side Promise must fail this test promptly.
+   let watchdog;
+   const pending=page.evaluate(async()=>{
+    const NativeWorker=globalThis.Worker;
+    if(typeof NativeWorker!=="function")throw Error("native Web Worker unavailable");
+    const lifecycle={created:0,terminated:0};
+    globalThis.Worker=class AuditedNativeWorker extends NativeWorker{
+     constructor(url,options){
+      if(options?.type!=="module"||!String(url).includes("/src/guest-worker.mjs"))
+       throw Error("guest must use native same-origin module Worker");
+      super(url,options);
+      lifecycle.created++;
+     }
+     terminate(){
+      lifecycle.terminated++;
+      return super.terminate();
+     }
+    };
+    try {
     const {runVerifiedCoreGuestInWorker:run}=await import("/src/worker-host.mjs");
     const section=(id,body)=>[id,body.length,...body];
     const name=s=>[s.length,...new TextEncoder().encode(s)];
@@ -99,8 +118,11 @@ try{
     const getter={...metadata};
     Object.defineProperty(getter,"wasmSha256",{get(){throw Error("GETTER CALLED")},
      enumerable:true});
+    const beforeGetter=lifecycle.created;
     try{await run({wasmBytes:good,manifest:getter});throw Error("getter manifest admitted")}
     catch(e){if(!/manifest serialization/.test(String(e)))throw e}
+    if(lifecycle.created!==beforeGetter)
+     throw Error("invalid manifest unexpectedly spawned a native Worker");
     const original=good.slice(),mutable=structuredClone(metadata);
     const underway=run({wasmBytes:original,manifest:mutable,timeoutMs:8000});
     original.fill(0);
@@ -120,12 +142,28 @@ try{
     // Recovery after termination proves subsequent fresh Worker still executes.
     const recovered=await run({wasmBytes:good,manifest:metadata,timeoutMs:8000});
     if(recovered!==42n)throw Error("post-timeout Worker recovery failed");
+    if(lifecycle.created!==14||lifecycle.terminated!==lifecycle.created)
+     throw Error("real Worker lifecycle mismatch: "+JSON.stringify(lifecycle));
     return {workerKind:"real browser module Worker",result:value.toString(),
       parallelRuns:series.length,rejectCases:5,timeoutTerminated:true,
+      workerCreated:lifecycle.created,workerTerminated:lifecycle.terminated,
       mainThreadTicks:ticks,recovered:recovered.toString()};
+    }finally{
+     globalThis.Worker=NativeWorker;
+    }
    });
+   let result;
+   try{
+    result=await Promise.race([
+     pending,
+     new Promise((_,reject)=>{watchdog=setTimeout(()=>
+       reject(Error("browser evaluation exceeded independent 90-second deadline")),90000);})
+    ]);
+   }finally{clearTimeout(watchdog)}
    assert.deepEqual(result.result,"42");
    assert.equal(result.timeoutTerminated,true);
+   assert.equal(result.workerCreated,14);
+   assert.equal(result.workerTerminated,14);
    process.stdout.write("PASS "+label+" "+JSON.stringify(result)+"\n");
   }catch(error){
    failCount++;
