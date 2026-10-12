@@ -31,18 +31,13 @@ export function createActorMessageTransport({
  schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic,
  guest,actorKey,maxFrameBytes=1048576,maxReservedBytes=4194304
 }={}){
- // Validate bounded INIT metadata and full descriptor grammar before
- // worker creation, guest-copy allocation, or any user-visible admission.
- if(typeof schemaId!=="string"||typeof descriptor!=="string"||
-    schemaId.length<1||schemaId.length>256||
-    descriptor.length<1||descriptor.length>4096||
-    !/^[\x21-\x7e]+$/.test(schemaId)||
-    !/^[\x21-\x7e]+$/.test(descriptor)||
-    new TextEncoder().encode(schemaId).length>256||
-    new TextEncoder().encode(descriptor).length>4096)
-  fail("invalid schema or descriptor byte budget");
+ // Use the exact canonical codec grammar for both host preflight and Worker
+ // INIT. In particular this rejects malformed nesting before carrier creation.
  try{validateActorMessageV2Contract({schemaId,descriptor})}
- catch{fail("invalid schema or descriptor shape")}
+ catch(error){
+  const budget=/invalid schema ID|invalid shape descriptor/.test(String(error?.message||""));
+  fail(budget?"invalid schema or descriptor byte budget":"invalid schema or descriptor shape");
+ }
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>4096)fail("invalid capacity");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid deadline");
  if(!Number.isSafeInteger(maxFrameBytes)||maxFrameBytes<64||maxFrameBytes>1048576)fail("invalid frame byte budget");

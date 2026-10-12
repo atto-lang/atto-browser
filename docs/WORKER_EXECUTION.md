@@ -120,3 +120,18 @@ ORE_REAL_ACTOR_WASM=/absolute/path/counter.wasm \
 ORE_REAL_ACTOR_MANIFEST=/absolute/path/counter.wasm.artifact.json \
 node scripts/verify-compiled-actor-browser.mjs
 ```
+
+## Canonical compiled actor INIT and terminal hardening
+
+The bounded canonical `validateActorMessageV2Contract` codec parser is the
+single source of truth for both host and Worker INIT validation. Invalid
+shape grammar or excessive nesting is rejected before allocating a Worker;
+a forged INIT arriving directly in the Worker is checked independently.
+After a terminal panic or drain, the endpoint never publishes READY or
+acknowledges DATA, and discards owned DATA frames and guest artifact bytes.
+An INIT pending asynchronous WebAssembly admission must check its closed
+state before running compiler-generated actor initialization.
+
+These guarantees cover a **single JavaScript agent** and its dedicated Worker.
+They do not establish cross-tab or distributed actor fencing, arbitrary
+async cancellation of CPU-bound Wasm guest code, or Java/GraalVM parity.

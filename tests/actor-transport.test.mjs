@@ -448,3 +448,30 @@ test("detached active frame cannot prevent cancellation cleanup",async()=>{
  assert.equal(actor.pending,0);
  assert.equal(terminated,1);
 });
+
+test("canonical INIT rejects malformed and overdeep shapes before allocating a Worker",()=>{
+ let allocations=0;
+ const factory=()=>{allocations++;throw Error("worker must not allocate")};
+ for(const descriptor of ["T[S,]","A[]","T[S,,I]","T[S,I]junk",
+   "A[".repeat(65)+"I"+"]".repeat(65),
+   "T[".repeat(65)+"I"+"]".repeat(65)]){
+  assert.throws(()=>createActorMessageTransport({...spec,descriptor,workerFactory:factory}),
+   /invalid schema or descriptor/);
+ }
+ assert.equal(allocations,0);
+});
+
+test("canonical nested INIT grammar admits a valid bounded descriptor",async()=>{
+ let init,terminations=0;
+ const actor=createActorMessageTransport({
+  schemaId:"example.Compute#variant=1",descriptor:"T[A[I],FL[B,S]]",
+  workerFactory:()=>({
+   addEventListener(){},removeEventListener(){},
+   postMessage(message){if(message.kind==="oreslang-v2-init")init=message},
+   terminate(){terminations++}
+  })
+ });
+ assert.equal(init.descriptor,"T[A[I],FL[B,S]]");
+ await assert.rejects(actor.stop(),/cancelled/);
+ assert.equal(terminations,1);
+});

@@ -109,21 +109,21 @@ function scrubOwnedFrame(frame){
 }
 self.addEventListener("message",async event=>{
  const data=event?.data;
+ // Panic, final drain, and failed INIT are absorbing. A late INIT may still
+ // carry Worker-owned compiled guest bytes that must be erased.
+ if(closed){
+  scrubOwnedFrame(data?.frame);
+  scrubOwnedFrame(data?.guest?.wasmBytes);
+  return;
+ }
  if(!data||typeof data!=="object")return panic();
  if(!ready){
-  if(initializing||data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
-    typeof data.descriptor!=="string"||
-    data.schemaId.length<1||data.schemaId.length>256||
-    data.descriptor.length<1||data.descriptor.length>4096||
-    !/^[\x21-\x7e]+$/.test(data.schemaId)||
-    !/^[\x21-\x7e]+$/.test(data.descriptor)){
-   // Invalid INIT never transfers guest ownership to the Wasm loader.
-   // Scrub the received structured-clone bytes before terminal failure.
+  if(initializing||data.kind!=="oreslang-v2-init"){
    scrubOwnedFrame(data.frame);
    scrubOwnedFrame(data.guest?.wasmBytes);
-   return panic()
+   return panic();
   }
-  // A descriptor must pass the complete bounded schema grammar before READY.
+  // One bounded grammar shared by host, Worker and typed DATA frames.
   try{validateActorMessageV2Contract(data)}catch{
    scrubOwnedFrame(data.frame);
    scrubOwnedFrame(data.guest?.wasmBytes);
@@ -146,11 +146,6 @@ self.addEventListener("message",async event=>{
   ready=true;
   self.postMessage(tagged({kind:"oreslang-v2-ready"}));
   return;
- }
- if(closed){
-  scrubOwnedFrame(data.frame);
-  scrubOwnedFrame(data.guest?.wasmBytes);
-  return
  }
  // The incarnation is an exact capability for this Worker lifetime.
  // A stale queued DATA/CONTROL message from a previous actor incarnation

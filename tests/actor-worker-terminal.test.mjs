@@ -46,3 +46,29 @@ test("in-flight decode must not ACK after concurrent terminal CONTROL panic",asy
   else delete globalThis.crypto;
  }
 });
+
+test("terminal INIT panic is absorbing and scrubs late DATA plus guest bytes",async()=>{
+ const originalSelf=Object.getOwnPropertyDescriptor(globalThis,"self");
+ let handler;const sent=[];
+ try{
+  Object.defineProperty(globalThis,"self",{configurable:true,value:{
+   addEventListener(kind,fn){if(kind==="message")handler=fn},
+   postMessage(message){sent.push(message)}
+  }});
+  await import("../src/actor-message-worker.mjs?terminal-init-regression=integrated-20261012");
+  await handler({data:{kind:"oreslang-v2-init",schemaId:"x",descriptor:"T[I,]"}});
+  assert.deepEqual(sent,[{kind:"oreslang-v2-panic"}]);
+  const abandonedGuest=Uint8Array.from([0,97,115,109,1,0,0,0]);
+  await handler({data:{kind:"oreslang-v2-init",schemaId:"x",descriptor:"I",
+   guest:{wasmBytes:abandonedGuest}}});
+  const abandonedFrame=Uint8Array.from([0x91,0x01]);
+  await handler({data:{kind:"oreslang-v2-data",id:1,frame:abandonedFrame}});
+  await handler({data:null});
+  assert.deepEqual(sent,[{kind:"oreslang-v2-panic"}]);
+  assert.ok(abandonedGuest.every(x=>x===0),"late guest allocation erased");
+  assert.ok(abandonedFrame.every(x=>x===0),"late DATA allocation erased");
+ }finally{
+  if(originalSelf)Object.defineProperty(globalThis,"self",originalSelf);
+  else delete globalThis.self;
+ }
+});
