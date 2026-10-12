@@ -83,19 +83,19 @@ export function createActorMessageTransport({
  if(!worker||["postMessage","addEventListener","removeEventListener","terminate"].some(x=>typeof worker[x]!=="function")){
   // A broken factory may already have allocated a live OS Worker before
   // returning an incomplete adapter. Revoke it rather than leaking a carrier.
-  try{const termination=worker?.terminate?.();termination?.catch?.(()=>{})}catch{}
   guestBytes?.fill(0);
-  // Keep the identity fenced if termination cannot be confirmed.
-  if(actorKey!==undefined){
-   try{
-    const termination=worker?.terminate?.();
-    if(termination&&typeof termination.then==="function")
-     termination.then(()=>{if(activeIncarnations.get(actorKey)===incarnation)
-      activeIncarnations.delete(actorKey)}).catch(()=>{});
-    else if(activeIncarnations.get(actorKey)===incarnation)
-     activeIncarnations.delete(actorKey);
-   }catch{}
-  }
+  // Terminate at most once. Never release an identity until its carrier
+  // confirms retirement; an unconfirmed carrier retains the fence.
+  try{
+   const termination=worker?.terminate?.();
+   if(termination&&typeof termination.then==="function")
+    termination.then(()=>{
+     if(actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
+      activeIncarnations.delete(actorKey);
+    }).catch(()=>{});
+   else if(worker&&actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
+    activeIncarnations.delete(actorKey);
+  }catch{}
   fail("trusted dedicated Worker required");
  }
  let pending=0,ready=false,active=null,sealed=false,stopping=false,finished=false,seq=0,deadline;
