@@ -47,6 +47,16 @@ export function createActorMessageTransport({
  // The completion promise may reject before the user requests get_done().
  // Suppress process-level unhandled rejection while retaining its rejection.
  done.catch(()=>{});
+ // A custom Worker adapter can detach the frame while posting a message.
+ // A detached ArrayBuffer already relinquishes host ownership; cleanup must
+ // never throw and leave the actor stuck in a partially terminal state.
+ const scrub=frame=>{
+  if(!frame)return;
+  try{frame.fill(0)}catch{
+   // Transfer/detachment removes the host-side allocation. An unexpected
+   // failure must not prevent CONTROL terminalization.
+  }
+ };
  const clear=()=>{if(deadline!==undefined){clearTimeout(deadline);deadline=undefined}};
  const arm=()=>{if(finished)return;clear();deadline=setTimeout(()=>fatal(Error("isolated actor Worker deadline exceeded")),timeoutMs)};
  const cleanup=()=>{
@@ -62,13 +72,13 @@ export function createActorMessageTransport({
   // unresolved admission futures waiting on untrusted crypto providers.
   for(const item of queue){
    item.abort?.(error||Error("actor stopped"));
-   item.frame?.fill(0);
+   scrub(item.frame);
    item.frame=null;
   }
   queue.length=0;
   // The active frame belongs to this mailbox until an internal delivery
   // receipt; cancellation/panic must scrub it, too.
-  active?.frame?.fill(0);
+  scrub(active?.frame);
   active=null;pending=0;
   cleanup();
   if(error){if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}doneReject(error)}
@@ -122,7 +132,7 @@ export function createActorMessageTransport({
    clear();
    // Worker postMessage uses structured clone (no transfer list). The host
    // must not retain a second copy of a processed DATA frame.
-   active.frame?.fill(0);
+   scrub(active.frame);
    active.frame=null;active=null;pending--;pump();return
   }
   if(m.kind==="oreslang-v2-stopped"&&stopping&&active===null&&pending===0){complete();return}
@@ -163,7 +173,7 @@ export function createActorMessageTransport({
     // The encode promise can finish after stop() already rejected the
     // admission race. Scrub that late owned frame rather than abandoning it.
     const encoding=encodeActorMessageV2({schemaId,descriptor,value,maxBytes:maxFrameBytes})
-     .then(frame=>{if(finished)frame.fill(0);return frame});
+     .then(frame=>{if(finished)scrub(frame);return frame});
     const frame=await Promise.race([encoding,cancelled,admissionDeadline]);
     if(finished)fail("actor stopped during message admission");
     item.frame=frame;
@@ -177,7 +187,7 @@ export function createActorMessageTransport({
    }catch(error){
     if(!finished){
      pending--;const pos=queue.indexOf(item);if(pos>=0)queue.splice(pos,1);
-     item.frame?.fill(0);item.frame=null;
+     scrub(item.frame);item.frame=null;
     }
     pump();throw error
    }finally{
