@@ -275,9 +275,9 @@ test("codec checks payload array descriptors before invoking any getter",async()
  Object.defineProperty(items,"1",{configurable:true,enumerable:true,get(){calls++;throw Error("getter executed")}});
  await assert.rejects(encodeMessage(payloadSchema,{variant:"Compute",fields:{items}}),/accessor tuple element/);
  const listSchema={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"items",type:{list:{element:"i64",maxLength:4}}}]}]};
- await assert.rejects(encodeMessage(listSchema,{variant:"Compute",fields:{items}}),/accessor array\\/list element/);
+ await assert.rejects(encodeMessage(listSchema,{variant:"Compute",fields:{items}}),/accessor array.list element/);
  const fixedSchema={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"items",type:{array:{element:"i64",length:2}}}]}]};
- await assert.rejects(encodeMessage(fixedSchema,{variant:"Compute",fields:{items}}),/accessor array\\/list element/);
+ await assert.rejects(encodeMessage(fixedSchema,{variant:"Compute",fields:{items}}),/accessor array.list element/);
  assert.equal(calls,0);
 });
 
