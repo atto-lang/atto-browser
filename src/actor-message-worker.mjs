@@ -3,7 +3,7 @@
  * emits internal DATA receipts, honors a separate CONTROL drain channel.
  * Does not execute source-level Oreslang actor handlers.
  */
-import {decodeActorMessageV2} from "./messagepack-v2.mjs";
+import {decodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 let ready=false,closed=false,handling=false,stopPending=false,initializing=false,contract,lastTicket=0;
 let guestHandler=null;
 const MAX_WASM_BYTES=16*1024*1024;
@@ -110,12 +110,22 @@ self.addEventListener("message",async event=>{
  if(!data||typeof data!=="object")return panic();
  if(!ready){
   if(initializing||data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
-    typeof data.descriptor!=="string"){
+    typeof data.descriptor!=="string"||
+    data.schemaId.length<1||data.schemaId.length>256||
+    data.descriptor.length<1||data.descriptor.length>4096||
+    !/^[\x21-\x7e]+$/.test(data.schemaId)||
+    !/^[\x21-\x7e]+$/.test(data.descriptor)){
    // Invalid INIT never transfers guest ownership to the Wasm loader.
    // Scrub the received structured-clone bytes before terminal failure.
    scrubOwnedFrame(data.frame);
    scrubOwnedFrame(data.guest?.wasmBytes);
    return panic()
+  }
+  // A descriptor must pass the complete bounded schema grammar before READY.
+  try{validateActorMessageV2Contract(data)}catch{
+   scrubOwnedFrame(data.frame);
+   scrubOwnedFrame(data.guest?.wasmBytes);
+   return panic();
   }
   initializing=true;
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
