@@ -1,3 +1,4 @@
+import {snapshotCoreManifest} from "./core-manifest-snapshot.mjs";
 /**
  * Single-shot browser Worker admission for a SHA-256 pinned core-i64 Wasm guest.
  * This is isolation for pure scalar guests, NOT an Oreslang actor runtime.
@@ -32,9 +33,7 @@ export function runVerifiedCoreGuestInWorker({
  // Snapshot before any worker creation, event registration or async operation.
  const bytes=snapshotBytes(wasmBytes,maxModuleBytes);
  if(bytes.length>maxModuleBytes)fail("Wasm module exceeds host byte budget");
- let admittedManifest;
- try{admittedManifest=JSON.parse(JSON.stringify(manifest));}
- catch{fail("invalid artifact manifest serialization");}
+ const admittedManifest=snapshotCoreManifest(manifest);
  if(!admittedManifest||typeof admittedManifest!=="object"||Array.isArray(admittedManifest))
   fail("invalid artifact manifest");
  const create=workerFactory||(()=>{
