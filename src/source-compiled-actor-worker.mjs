@@ -40,13 +40,21 @@ async function load(data){
   owned=Uint8Array.from(bytes);
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",owned)))
    .map(x=>x.toString(16).padStart(2,"0")).join("");
+  // A malformed concurrent message can put this Worker into terminal panic
+  // while SHA-256 is suspended. Never inspect or compile a cancelled guest.
+  if(phase!=="LOADING")return;
   if(hash!==data.wasmSha256)throw Error("compiled actor digest mismatch");
   // Require a fixed two-page maximum, no start function, no table, and no
   // unbounded memory growth. Compile the exact inspected private snapshot.
   inspected=inspectWasmBytes(owned,{maxModuleBytes:MAX_GUEST_BYTES,maxMemoryPages:2});
   if(inspected.memoryCount!==1||!inspected.hasMemoryMaximum)
    throw Error("compiled actor requires bounded guest memory");
+  // Inspection and compilation may be expensive; LOAD can be terminally
+  // cancelled during either async step. No post-panic guest instantiation,
+  // init(), or READY is permitted regardless of successful compilation.
+  if(phase!=="LOADING")return;
   const module=await WebAssembly.compile(inspected.bytes);
+  if(phase!=="LOADING")return;
   if(WebAssembly.Module.imports(module).length!==0)
    throw Error("compiled actor has forbidden imports");
   const exports=WebAssembly.Module.exports(module);
@@ -55,9 +63,13 @@ async function load(data){
   for(const name of required)
    if(!exports.some(x=>x.name===name&&x.kind==="function"))
     throw Error("missing compiler-generated actor ABI "+name);
+  if(phase!=="LOADING")return;
   const instance=new WebAssembly.Instance(module);
   for(const name of required)if(typeof instance.exports[name]!=="function")
    throw Error("incorrect guest ABI");
+  // The last gate is immediately before the first execution of compiled
+  // actor code; JS/Wasm init is synchronous and import-free once invoked.
+  if(phase!=="LOADING")return;
   instance.exports.oreslang_wasm_actor_init();
   if(phase!=="LOADING")throw Error("INIT cancelled");
   guest=instance.exports;
