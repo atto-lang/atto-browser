@@ -132,7 +132,13 @@ export function createOwnedActorWorker({
    // its response reentrantly while postMessage is still on the stack.
    entry.sent=true;
    // No transfer list: ownership is copied across the isolated Worker.
-   worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
+   try{
+    worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
+   }catch{
+    // A throwing Worker adapter could have delivered bytes before throwing.
+    // The physical admission outcome is unknown, so do not reuse its lane.
+    cancelAll(new Error("actor Worker publication uncertain"));
+   }
   });
   transmit=posted.catch(()=>{});
   // Return the reserved result immediately: waiting on posted would defeat
