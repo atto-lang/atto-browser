@@ -13,8 +13,19 @@ const enc=new TextEncoder(),dec=new TextDecoder("utf-8",{fatal:true});
 const prim=new Set(["string","i64","bool","bytes"]);
 const plain=x=>x!==null&&typeof x==="object"&&[Object.prototype,null].includes(Object.getPrototypeOf(x));
 const fail=reason=>{throw new TypeError("Oreslang envelope: "+reason)};
-function shape(x,keys,name){
- if(!plain(x)||Object.keys(x).some(k=>!keys.includes(k)))fail("invalid "+name+" shape");
+function shape(x,keys,name,required=[]){
+ if(!plain(x))fail("invalid "+name+" shape");
+ // Do not read getters or trust inherited schema declarations. The hash
+ // must describe own enumerable data rather than accessor side effects.
+ for(const key of Reflect.ownKeys(x)){
+  const desc=Object.getOwnPropertyDescriptor(x,key);
+  if(typeof key!=="string"||!keys.includes(key)||
+     !desc?.enumerable||!Object.hasOwn(desc,"value"))
+   fail("invalid "+name+" shape");
+ }
+ for(const key of required){
+  if(!Object.hasOwn(x,key))fail("missing "+name+" field "+key);
+ }
 }
 function unique(a,label){if(new Set(a).size!==a.length)fail("duplicate "+label);}
 // Every schema-bearing array must contain exactly its declared own data
@@ -50,13 +61,14 @@ function type(t,d=0,ctx){
   return {tuple:elements};
  }
  if(k==="array"||k==="list"){
-  shape(t[k],k==="array"?["element","length"]:["element","maxLength"],k);
+  shape(t[k],k==="array"?["element","length"]:["element","maxLength"],k,
+   k==="array"?["element","length"]:["element","maxLength"]);
   return {[k]:k==="array"?{element:type(t[k].element,d+1,ctx),length:bound(t[k].length)}
     :{element:type(t[k].element,d+1,ctx),maxLength:bound(t[k].maxLength)}};
  }
  denseSchemaArray(t.enum,"enum alternatives",1,256);
  const vs=t.enum.map(v=>{
-  shape(v,["id","name","payload"],"enum variant");
+  shape(v,["id","name","payload"],"enum variant",["id","name","payload"]);
   if(!Object.hasOwn(v,"payload"))fail("enum payload declaration required");
   return {id:id(v.id),name:name(v.name),payload:v.payload===null?null:type(v.payload,d+1,ctx)};
  });
@@ -64,14 +76,14 @@ function type(t,d=0,ctx){
  return {enum:vs.sort((a,b)=>a.id-b.id)};
 }
 function contract(c){
- shape(c,["schemaVersion","ownership","variants"],"contract");
+ shape(c,["schemaVersion","ownership","variants"],"contract",["schemaVersion","ownership","variants"]);
  if(c.schemaVersion!==1||c.ownership!=="copy")fail("unsupported contract version/ownership");
  denseSchemaArray(c.variants,"contract variants",1,256);
  const ctx={nodes:0};
  const vs=c.variants.map(v=>{
-  shape(v,["id","name","fields"],"variant");
+  shape(v,["id","name","fields"],"variant",["id","name","fields"]);
   denseSchemaArray(v.fields,"variant fields",0,64);
-  const fields=v.fields.map(f=>{shape(f,["name","type"],"field");return{name:name(f.name),type:type(f.type,0,ctx)}});
+  const fields=v.fields.map(f=>{shape(f,["name","type"],"field",["name","type"]);return{name:name(f.name),type:type(f.type,0,ctx)}});
   unique(fields.map(f=>f.name),"field");
   return {id:id(v.id),name:name(v.name),fields};
  });
@@ -81,6 +93,9 @@ function contract(c){
  if(enc.encode(JSON.stringify(normalized)).length>SCHEMA_BYTES)fail("schema byte budget exceeded");
  return normalized;
 }
+// Synchronous canonical clone for host admission: never JSON.stringify the
+// caller-supplied object, which could invoke a toJSON hook or a getter.
+export function normalizeOwnedContract(schema){return contract(schema)}
 async function digest(c){
  if(!globalThis.crypto?.subtle)fail("WebCrypto SHA-256 required");
  return new Uint8Array(await crypto.subtle.digest("SHA-256",
@@ -150,7 +165,7 @@ function encode(w,t,x,d=0){
   }
   return;
  }
- shape(x,["variant","value"],"enum value");
+ shape(x,["variant","value"],"enum value",["variant","value"]);
  const v=t.enum.find(a=>a.name===x.variant);if(!v)fail("unknown enum alternative");
  w.u16(v.id);
  if(v.payload===null){if(x.value!==null)fail("unit enum must be null");}
@@ -185,9 +200,9 @@ function budget(n){if(!Number.isSafeInteger(n)||n<HEADER||n>LIMIT)fail("invalid 
 export async function encodeMessage(schema,message,{maxBytes=LIMIT}={}){
  budget(maxBytes);
  const c=contract(schema);
- shape(message,["variant","fields"],"message");
+ shape(message,["variant","fields"],"message",["variant","fields"]);
  const v=c.variants.find(x=>x.name===message.variant);if(!v)fail("unknown message variant");
- shape(message.fields,v.fields.map(x=>x.name),"message fields");
+ shape(message.fields,v.fields.map(x=>x.name),"message fields",v.fields.map(x=>x.name));
  if(Object.keys(message.fields).length!==v.fields.length)fail("missing message field");
  const w=new Writer(maxBytes-HEADER);for(const f of v.fields)encode(w,f.type,message.fields[f.name]);
  // Payload bytes and normalized schema are snapshotted before any await.
