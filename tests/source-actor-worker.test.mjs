@@ -11,6 +11,7 @@ const manifestPath=process.env.ORE_REAL_ACTOR_MANIFEST;
 if(process.env.ORE_REQUIRE_REAL_ACTOR==="1"&&(!wasmPath||!manifestPath))
  throw Error("required compiler-generated actor Worker evidence is unconfigured");
 const spec={schemaId:"example.Counter#variant=1",descriptor:"I"};
+const incarnation="a".repeat(32),tag=x=>({...x,incarnation});
 const workerUrl=new URL("./fixtures/actor-node-worker-shim.mjs",import.meta.url);
 
 async function guest(){
@@ -36,21 +37,21 @@ test("real .ores source actor executes typed DATA in isolated Worker, preserves 
 },async()=>{
  const w=new Worker(workerUrl,{type:"module"});
  try{
-  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:await guest()}),
-   {kind:"oreslang-v2-ready"});
+  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:await guest(),incarnation}),
+   tag({kind:"oreslang-v2-ready"}));
   for(const [id,value,result] of [[1,2n,12n],[2,3n,15n],[4,1n,16n]]){
-   assert.deepEqual(await exchange(w,{kind:"oreslang-v2-data",id,frame:await dataFrame(value)}),
-    {kind:"oreslang-v2-receipt",id,ok:true,result});
+   assert.deepEqual(await exchange(w,{kind:"oreslang-v2-data",id,frame:await dataFrame(value),incarnation}),
+    tag({kind:"oreslang-v2-receipt",id,ok:true,result}));
   }
-  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-control",action:"drain"}),
-   {kind:"oreslang-v2-stopped"});
+  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-control",action:"drain",incarnation}),
+   tag({kind:"oreslang-v2-stopped"}));
  }finally{await w.terminate()}
  const second=new Worker(workerUrl,{type:"module"});
  try{
-  assert.equal((await exchange(second,{kind:"oreslang-v2-init",...spec,guest:await guest()})).kind,
+  assert.equal((await exchange(second,{kind:"oreslang-v2-init",...spec,guest:await guest(),incarnation})).kind,
    "oreslang-v2-ready");
-  assert.deepEqual(await exchange(second,{kind:"oreslang-v2-data",id:1,frame:await dataFrame(1n)}),
-   {kind:"oreslang-v2-receipt",id:1,ok:true,result:11n});
+  assert.deepEqual(await exchange(second,{kind:"oreslang-v2-data",id:1,frame:await dataFrame(1n),incarnation}),
+   tag({kind:"oreslang-v2-receipt",id:1,ok:true,result:11n}));
  }finally{await second.terminate()}
 });
 
@@ -62,8 +63,8 @@ test("tampered compiled actor binary is rejected before Ready or DATA receipt",{
   const g=await guest();
   g.wasmBytes=Uint8Array.from(g.wasmBytes);
   g.wasmBytes[g.wasmBytes.length-1]^=1;
-  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g}),
-   {kind:"oreslang-v2-panic"});
+  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g,incarnation}),
+   tag({kind:"oreslang-v2-panic"}));
  }finally{await w.terminate()}
 });
 
@@ -104,8 +105,8 @@ test("forged manifest cannot hide actor Wasm memory growth above two pages",{
  // the actor's real memory budget.
  const w=new Worker(workerUrl,{type:"module"});
  try{
-  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g}),
-   {kind:"oreslang-v2-panic"});
+  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g,incarnation}),
+   tag({kind:"oreslang-v2-panic"}));
  }finally{await w.terminate()}
 });
 
@@ -129,7 +130,7 @@ test("bounded host transport admits the real Wasm actor without changing origina
    terminate(){return raw.terminate()}
   };
  }
- const actor=createActorMessageTransport({...spec,workerFactory:factory,guest:g});
+ const actor=createActorMessageTransport({...spec,workerFactory:factory,guest:g,actorKey:"test/source-counter-identity",incarnation});
  assert.equal(await actor.send(2n),true);
  assert.equal(await actor.send(3n),true);
  await actor.drain();
