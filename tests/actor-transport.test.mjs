@@ -376,10 +376,14 @@ test("oversized or empty Worker INIT metadata fails before Worker allocation",()
  const workerFactory=()=>{started++;throw Error("unexpected carrier allocation")};
  for(const contract of [
   {schemaId:"",descriptor:"T[S,I]"},
+  {schemaId:"x".repeat(257),descriptor:"T[S,I]"},
   {schemaId:"x".repeat(513),descriptor:"T[S,I]"},
+  {schemaId:"line\nbreak",descriptor:"T[S,I]"},
+  {schemaId:"🌐",descriptor:"T[S,I]"},
   {schemaId:"🌐".repeat(200),descriptor:"T[S,I]"},
   {schemaId:spec.schemaId,descriptor:""},
   {schemaId:spec.schemaId,descriptor:"x".repeat(4097)},
+  {schemaId:spec.schemaId,descriptor:"T[S,\nI]"},
   {schemaId:spec.schemaId,descriptor:"🌐".repeat(1100)}
  ]){
   assert.throws(()=>createActorMessageTransport({...contract,workerFactory}),
