@@ -11,6 +11,7 @@ const manifestPath=process.env.ORE_REAL_ACTOR_MANIFEST;
 if(process.env.ORE_REQUIRE_REAL_ACTOR==="1"&&(!wasmPath||!manifestPath))
  throw Error("required compiled source actor fixture is unavailable");
 const schemaId="example.Counter#variant=1",descriptor="I";
+const incarnation="b".repeat(32),tag=x=>({...x,incarnation});
 
 test("terminal replay during digest prevents ALL subsequent compiled actor execution",{
  skip:!wasmPath||!manifestPath
@@ -56,20 +57,20 @@ test("terminal replay during digest prevents ALL subsequent compiled actor execu
   Object.defineProperty(globalThis,"WebAssembly",{configurable:true,value:wasm});
   await import("../src/actor-message-worker.mjs?terminal-execution-fence=1");
   await listener({data:{kind:"oreslang-v2-init",schemaId,descriptor,
-   guest:{wasmBytes:bytes,manifest}}});
-  assert.deepEqual(sent,[{kind:"oreslang-v2-ready"}]);
+   guest:{wasmBytes:bytes,manifest},incarnation}});
+  assert.deepEqual(sent,[tag({kind:"oreslang-v2-ready"})]);
   holdDigest=true;
   const input=Uint8Array.from(frame);
-  const pending=listener({data:{kind:"oreslang-v2-data",id:1,frame:input}});
+  const pending=listener({data:{kind:"oreslang-v2-data",id:1,frame:input,incarnation}});
   await entered;
   const rejected=Uint8Array.from(frame);
-  await listener({data:{kind:"oreslang-v2-data",id:2,frame:rejected}});
-  assert.deepEqual(sent,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}]);
+  await listener({data:{kind:"oreslang-v2-data",id:2,frame:rejected,incarnation}});
+  assert.deepEqual(sent,[tag({kind:"oreslang-v2-ready"}),tag({kind:"oreslang-v2-panic"})]);
   assert.equal(turns,0);
   releaseDigest();
   await pending;
   assert.equal(turns,0,"terminated actor was executed after async decode resumed");
-  assert.deepEqual(sent,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}],
+  assert.deepEqual(sent,[tag({kind:"oreslang-v2-ready"}),tag({kind:"oreslang-v2-panic"})],
    "terminal actor must not acknowledge the in-flight DATA");
   assert.ok(input.every(x=>x===0));
   assert.ok(rejected.every(x=>x===0));
