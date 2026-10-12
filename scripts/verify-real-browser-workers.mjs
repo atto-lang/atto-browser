@@ -21,6 +21,7 @@ assert.ok(runtime,"ORESLANG_WASM_RUNTIME_BINARY is required (real compiled C ABI
 const allowed=new Map([
  ["/src/actor-transport.mjs",resolve(root,"src/actor-transport.mjs")],
  ["/src/actor-message-worker.mjs",resolve(root,"src/actor-message-worker.mjs")],
+ ["/src/actor-contract.mjs",resolve(root,"src/actor-contract.mjs")],
  ["/src/messagepack-v2.mjs",resolve(root,"src/messagepack-v2.mjs")],
  ["/src/loader.mjs",resolve(root,"src/loader.mjs")],
  ["/src/inspect.mjs",resolve(root,"src/inspect.mjs")],
