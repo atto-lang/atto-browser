@@ -40,6 +40,10 @@ async function load(data){
   owned=Uint8Array.from(bytes);
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",owned)))
    .map(x=>x.toString(16).padStart(2,"0")).join("");
+  // WebCrypto yields to the Worker event loop: terminal CONTROL or a
+  // concurrent invalid DATA can panic while the digest is pending.
+  // A cancelled init must never compile or invoke any guest export.
+  if(phase!=="LOADING")throw Error("INIT cancelled during digest");
   if(hash!==data.wasmSha256)throw Error("compiled actor digest mismatch");
   // Require a fixed two-page maximum, no start function, no table, and no
   // unbounded memory growth. Compile the exact inspected private snapshot.
@@ -55,11 +59,14 @@ async function load(data){
   for(const name of required)
    if(!exports.some(x=>x.name===name&&x.kind==="function"))
     throw Error("missing compiler-generated actor ABI "+name);
+  if(phase!=="LOADING")throw Error("INIT cancelled during compilation");
   const instance=new WebAssembly.Instance(module);
   for(const name of required)if(typeof instance.exports[name]!=="function")
    throw Error("incorrect guest ABI");
+  // This must precede guest init(), not follow it: initialization is itself
+  // guest execution and must be excluded after a terminal panic.
+  if(phase!=="LOADING")throw Error("INIT cancelled before guest entry");
   instance.exports.oreslang_wasm_actor_init();
-  if(phase!=="LOADING")throw Error("INIT cancelled");
   guest=instance.exports;
   contract={schemaId:data.schemaId,descriptor:"I"};
   phase="ACTIVE";
