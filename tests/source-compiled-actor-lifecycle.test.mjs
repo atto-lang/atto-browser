@@ -24,9 +24,11 @@ async function verifyInterruptedInit(stage){
  const fakeWebAssembly={
   validate(){return true},
   compile(){compilations++;compileStarted();return compileWait},
-  Module:{
-   imports(){return []},
-   exports(){return names.map(name=>({name,kind:"function"}))}
+  // inspectWasmBytes uses instanceof WebAssembly.Module: preserve a
+  // constructor-shaped mock rather than an object with static methods.
+  Module:class{
+   static imports(){return []}
+   static exports(){return names.map(name=>({name,kind:"function"}))}
   },
   Instance:class{
    constructor(){
