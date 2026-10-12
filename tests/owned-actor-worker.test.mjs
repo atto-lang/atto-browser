@@ -343,3 +343,28 @@ test("decode snapshots hostile buffer views using intrinsic byte slots",async()=
  }
  assert.equal(accesses,0);
 });
+
+
+test("uncertain Worker publication terminates the actor instead of reusing its lane",async()=>{
+ let onMessage,terminated=0,posts=0;
+ const fake=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-owned-actor-init-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-ready-v1",ok:true}}));
+   if(msg.kind==="oreslang-owned-actor-request-v1"){
+    posts++;
+    throw new Error("injected ambiguous postMessage");
+   }
+  },
+  terminate(){terminated++}
+ });
+ const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:1000});
+ await assert.rejects(actor.request(compute("uncertain",1)),/publication uncertain/);
+ assert.equal(posts,1);
+ assert.equal(terminated,1);
+ assert.equal(actor.pending,0);
+ await assert.rejects(actor.request(compute("must-not-run",2)),/actor closed/);
+ assert.equal(posts,1);
+});
