@@ -266,3 +266,27 @@ test("owned envelope rejects accessor-backed payload fields and prototype fields
  const inherited=Object.create({text:"inherited",n:4n});
  await assert.rejects(encodeMessage(schema,{variant:"Compute",fields:inherited}),/invalid message fields shape/);
 });
+
+
+test("codec checks payload array descriptors before invoking any getter",async()=>{
+ let calls=0;
+ const payloadSchema={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"items",type:{tuple:["i64","i64"]}}]}]};
+ const items=[1n,2n];
+ Object.defineProperty(items,"1",{configurable:true,enumerable:true,get(){calls++;throw Error("getter executed")}});
+ await assert.rejects(encodeMessage(payloadSchema,{variant:"Compute",fields:{items}}),/accessor tuple element/);
+ const listSchema={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"items",type:{list:{element:"i64",maxLength:4}}}]}]};
+ await assert.rejects(encodeMessage(listSchema,{variant:"Compute",fields:{items}}),/accessor array\\/list element/);
+ const fixedSchema={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"items",type:{array:{element:"i64",length:2}}}]}]};
+ await assert.rejects(encodeMessage(fixedSchema,{variant:"Compute",fields:{items}}),/accessor array\\/list element/);
+ assert.equal(calls,0);
+});
+
+test("codec rejects oversize ArrayBuffer and view before allocation/hash work",async()=>{
+ const over=new ArrayBuffer(1048577);
+ const arrayView=new Uint8Array(over);
+ const dataView=new DataView(over);
+ for(const source of [over,arrayView,dataView])
+  await assert.rejects(decodeMessage(schema,source,{maxBytes:1048576}),/invalid message size/);
+ const tiny=new ArrayBuffer(43);
+ await assert.rejects(decodeMessage(schema,tiny),/invalid message size/);
+});
