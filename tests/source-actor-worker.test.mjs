@@ -137,3 +137,22 @@ test("bounded host transport admits the real Wasm actor without changing origina
  assert.deepEqual(Uint8Array.from(g.wasmBytes),original,"caller-owned compiler artifact not mutated");
  assert.equal(actor.pending,0);
 });
+
+test("stale DATA and CONTROL incarnations never execute the compiled guest",{
+ skip:!wasmPath||!manifestPath
+},async()=>{
+ for(const kind of ["data","control"]){
+  const w=new Worker(workerUrl,{type:"module"});
+  try{
+   assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,
+    guest:await guest(),incarnation}),tag({kind:"oreslang-v2-ready"}));
+   const forged="f".repeat(32);
+   const packet=kind==="data"?
+    {kind:"oreslang-v2-data",id:1,frame:await dataFrame(100n),incarnation:forged}:
+    {kind:"oreslang-v2-control",action:"drain",incarnation:forged};
+   assert.deepEqual(await exchange(w,packet),tag({kind:"oreslang-v2-panic"}));
+   // Once terminal, even a valid later message must not be executed.
+   w.postMessage({kind:"oreslang-v2-data",id:2,frame:await dataFrame(1n),incarnation});
+  }finally{await w.terminate()}
+ }
+});
