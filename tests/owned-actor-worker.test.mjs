@@ -314,3 +314,17 @@ test("host rejects request variant getter without executing it or reserving capa
   assert.equal(requests,0);
  }finally{actor.close()}
 });
+
+
+test("owned bytes ignore caller iterator, length and buffer getters",async()=>{
+ let invoked=0;
+ const original=new Uint8Array([7,8,9]);
+ Object.defineProperty(original,Symbol.iterator,{configurable:true,value(){invoked++;throw Error("poison iterator")}});
+ Object.defineProperty(original,"byteLength",{configurable:true,get(){invoked++;throw Error("poison length")}});
+ Object.defineProperty(original,"buffer",{configurable:true,get(){invoked++;throw Error("poison buffer")}});
+ const contract={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"payload",type:"bytes"}]}]};
+ const encoded=await encodeMessage(contract,{variant:"Compute",fields:{payload:original}});
+ const roundtrip=await decodeMessage(contract,encoded);
+ assert.deepEqual([...roundtrip.fields.payload],[7,8,9]);
+ assert.equal(invoked,0);
+});
