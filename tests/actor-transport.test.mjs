@@ -404,3 +404,47 @@ test("malformed printable actor descriptors are denied before Worker allocation"
  }
  assert.equal(allocated,0);
 });
+
+test("detached DATA buffers cannot prevent terminal receipt and cleanup",async()=>{
+ let receive,terminations=0;
+ const factory=()=>({
+  addEventListener(kind,cb){if(kind==="message")receive=cb},
+  removeEventListener(){},
+  postMessage(message){
+   if(message.kind==="oreslang-v2-init")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-ready"}}));
+   if(message.kind==="oreslang-v2-data"){
+    // Emulate an adapter that transfers the ownership of the frame.
+    structuredClone(message.frame,{transfer:[message.frame.buffer]});
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-receipt",id:message.id,ok:true}}));
+   }
+   if(message.kind==="oreslang-v2-control")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-stopped"}}));
+  },
+  terminate(){terminations++}
+ });
+ const actor=createActorMessageTransport({...spec,workerFactory:factory,timeoutMs:500});
+ assert.equal(await actor.send(["detached",9n]),true);
+ await actor.drain();
+ assert.equal(actor.pending,0);
+ assert.equal(terminations,1);
+});
+
+test("detached active frame cannot prevent cancellation cleanup",async()=>{
+ let receive,terminated=0;
+ const factory=()=>({
+  addEventListener(kind,cb){if(kind==="message")receive=cb},
+  removeEventListener(){},
+  postMessage(message){
+   if(message.kind==="oreslang-v2-init")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-ready"}}));
+   if(message.kind==="oreslang-v2-data")
+    structuredClone(message.frame,{transfer:[message.frame.buffer]});
+  },terminate(){terminated++}
+ });
+ const actor=createActorMessageTransport({...spec,workerFactory:factory});
+ assert.equal(await actor.send(["detach-stop",3n]),true);
+ await assert.rejects(actor.stop(),/cancelled/);
+ assert.equal(actor.pending,0);
+ assert.equal(terminated,1);
+});
