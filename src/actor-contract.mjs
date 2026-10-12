@@ -13,7 +13,7 @@ export function validateActorWorkerContract(schemaId,descriptor){
  let at=0,nodes=0;
  function item(depth){
   if(depth>64||++nodes>100000)fail();
-  for(const [token,fixed] of [["FA[",true],["FL[",true],["T[",true],["A[",false],["L[",false]]]){
+  for(const [token,fixed] of [["FA[",true],["FL[",true],["T[",true],["A[",false],["L[",false]]){
    if(descriptor.startsWith(token,at)){
     at+=token.length;
     if(fixed){
