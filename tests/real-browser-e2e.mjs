@@ -14,7 +14,7 @@ const requireCompiled=process.env.ORESLANG_REQUIRE_COMPILED==="1";
 if(Boolean(compiledWasm)!==Boolean(compiledManifest)||
    (requireCompiled&&(!compiledWasm||!compiledManifest||
      !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_COMPILER_SHA256||"")||
-     !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_SOURCE_SHA256||""))){
+     !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_SOURCE_SHA256||"")))){
  throw Error("real compiled Oreslang E2E requires binary, manifest and pinned source/compiler SHA-256");
 }
 
