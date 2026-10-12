@@ -110,7 +110,13 @@ self.addEventListener("message",async event=>{
  if(!data||typeof data!=="object")return panic();
  if(!ready){
   if(initializing||data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
-    typeof data.descriptor!=="string"){scrubOwnedFrame(data.frame);return panic()}
+    typeof data.descriptor!=="string"){
+   // Invalid INIT never transfers guest ownership to the Wasm loader.
+   // Scrub the received structured-clone bytes before terminal failure.
+   scrubOwnedFrame(data.frame);
+   scrubOwnedFrame(data.guest?.wasmBytes);
+   return panic()
+  }
   initializing=true;
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
   if(data.guest!==undefined){
@@ -123,10 +129,18 @@ self.addEventListener("message",async event=>{
   self.postMessage({kind:"oreslang-v2-ready"});
   return;
  }
- if(closed){scrubOwnedFrame(data.frame);return}
+ if(closed){
+  scrubOwnedFrame(data.frame);
+  scrubOwnedFrame(data.guest?.wasmBytes);
+  return
+ }
  if(data.kind==="oreslang-v2-control"&&data.action==="drain"){
   stopPending=true;
-  if(!handling){closed=true;self.postMessage({kind:"oreslang-v2-stopped"})}
+  if(!handling){
+   closed=true;
+   guestHandler=null;
+   self.postMessage({kind:"oreslang-v2-stopped"})
+  }
   return;
  }
  if(data.kind!=="oreslang-v2-data"||!Number.isSafeInteger(data.id)||
@@ -160,7 +174,11 @@ self.addEventListener("message",async event=>{
   // wipe the Worker-owned input buffer on both acceptance and rejection.
   scrubOwnedFrame(data.frame);
   handling=false;
-  if(stopPending&&!closed){closed=true;self.postMessage({kind:"oreslang-v2-stopped"})}
+  if(stopPending&&!closed){
+   closed=true;
+   guestHandler=null;
+   self.postMessage({kind:"oreslang-v2-stopped"})
+  }
  }
 });
 function panic(){
