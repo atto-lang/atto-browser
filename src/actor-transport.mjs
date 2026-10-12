@@ -7,7 +7,7 @@ import {encodeActorMessageV2} from "./messagepack-v2.mjs";
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
 export function createActorMessageTransport({
  schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic,
- maxFrameBytes=1048576,maxReservedBytes=4194304
+ guest,maxFrameBytes=1048576,maxReservedBytes=4194304
 }={}){
  if(typeof schemaId!=="string"||typeof descriptor!=="string")fail("schema required");
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>4096)fail("invalid capacity");
@@ -15,15 +15,35 @@ export function createActorMessageTransport({
  if(!Number.isSafeInteger(maxFrameBytes)||maxFrameBytes<64||maxFrameBytes>1048576)fail("invalid frame byte budget");
  if(!Number.isSafeInteger(maxReservedBytes)||maxReservedBytes<maxFrameBytes||maxReservedBytes>67108864)
   fail("invalid total reserved byte budget");
+ // Clone before admission; the caller retains ownership of its original Wasm
+ // bytes. Never let a SharedArrayBuffer reach the execution Worker.
+ let guestBytes=null;
+ if(guest!==undefined){
+  if(descriptor!=="I"||!guest||typeof guest!=="object"||
+     !guest.manifest||typeof guest.manifest!=="object")
+   fail("compiled actor guest requires i64 descriptor and manifest");
+  const supplied=guest.wasmBytes;
+  if(typeof SharedArrayBuffer!=="undefined"&&
+     (supplied instanceof SharedArrayBuffer||
+      ArrayBuffer.isView(supplied)&&supplied.buffer instanceof SharedArrayBuffer))
+   fail("actor guest shared memory forbidden");
+  const view=supplied instanceof ArrayBuffer?new Uint8Array(supplied):
+   ArrayBuffer.isView(supplied)?new Uint8Array(supplied.buffer,supplied.byteOffset,supplied.byteLength):null;
+  if(!view||!view.byteLength||view.byteLength>16*1024*1024)
+   fail("actor guest Wasm byte budget");
+  guestBytes=Uint8Array.from(view);
+ }
  const create=workerFactory||(()=>{
   if(typeof Worker!=="function")fail("dedicated Web Worker unavailable");
   return new Worker(new URL("./actor-message-worker.mjs",import.meta.url),{type:"module"});
  });
- const worker=create();
+ let worker;
+ try{worker=create()}catch(error){guestBytes?.fill(0);throw error}
  if(!worker||["postMessage","addEventListener","removeEventListener","terminate"].some(x=>typeof worker[x]!=="function")){
   // A broken factory may already have allocated a live OS Worker before
   // returning an incomplete adapter. Revoke it rather than leaking a carrier.
   try{const termination=worker?.terminate?.();termination?.catch?.(()=>{})}catch{}
+  guestBytes?.fill(0);
   fail("trusted dedicated Worker required");
  }
  let pending=0,ready=false,active=null,sealed=false,stopping=false,finished=false,seq=0,deadline;
@@ -120,7 +140,10 @@ export function createActorMessageTransport({
   worker.addEventListener("error",onError);
   worker.addEventListener("messageerror",onError);
   try{worker.addEventListener("exit",onExit)}catch{}
-  worker.postMessage({kind:"oreslang-v2-init",schemaId,descriptor});
+  try{
+   worker.postMessage({kind:"oreslang-v2-init",schemaId,descriptor,
+    ...(guestBytes===null?{}:{guest:{wasmBytes:guestBytes,manifest:guest.manifest}})});
+  }finally{guestBytes?.fill(0)}
   if(!ready&&!finished)arm();
  }catch{
   // Even a partially registered custom Worker adapter must never leak its
