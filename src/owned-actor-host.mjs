@@ -3,7 +3,7 @@
  * The guest Worker is real, but the handler is not Oreslang-compiled code.
  * Every request crosses the Worker boundary as an owned typed envelope.
  */
-import {encodeMessage,decodeMessage} from "./owned-message/owned-envelope.mjs";
+import {encodeMessage,decodeMessage,normalizeOwnedContract} from "./owned-message/owned-envelope.mjs";
 
 const fail=reason=>{throw new TypeError("Oreslang owned actor Worker: "+reason)};
 export function createOwnedActorWorker({
@@ -13,7 +13,7 @@ export function createOwnedActorWorker({
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid timeout");
  if(!Number.isSafeInteger(maxBytes)||maxBytes<44||maxBytes>1048576)fail("invalid maxBytes");
  let snapped;
- try{snapped=JSON.parse(JSON.stringify(schema));}catch{fail("invalid schema serialization")}
+ try{snapped=normalizeOwnedContract(schema);}catch{fail("invalid schema admission")}
  if(!snapped||typeof snapped!=="object"||Array.isArray(snapped))fail("invalid schema");
  const make=workerFactory||(()=>{
   if(typeof Worker!=="function")fail("Web Worker unavailable");
