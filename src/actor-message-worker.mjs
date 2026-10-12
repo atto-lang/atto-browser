@@ -21,8 +21,16 @@ self.addEventListener("message",async event=>{
  const data=event?.data;
  if(!data||typeof data!=="object")return panic();
  if(!ready){
-  if(data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
-    typeof data.descriptor!=="string"){scrubOwnedFrame(data.frame);return panic()}
+  // Validate the same ASCII/byte envelope admitted by the canonical codec
+  // BEFORE publishing READY. A malformed direct INIT must fail as CONTROL
+  // panic rather than claiming that this Worker can receive typed DATA.
+  if(data.kind!=="oreslang-v2-init"||
+    typeof data.schemaId!=="string"||data.schemaId.length>256||
+    !/^[\x21-\x7e]{1,256}$/.test(data.schemaId)||
+    typeof data.descriptor!=="string"||data.descriptor.length>4096||
+    !/^[\x21-\x7e]{1,4096}$/.test(data.descriptor)){
+   scrubOwnedFrame(data.frame);return panic();
+  }
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
   ready=true;
   self.postMessage({kind:"oreslang-v2-ready"});
