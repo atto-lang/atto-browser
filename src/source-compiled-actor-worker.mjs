@@ -5,12 +5,14 @@
  * No native OresVM scheduler or source ActorRef/await/supervisor ABI here.
  */
 import {decodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
-const MAX_GUEST_BYTES=16*1024*1024;
+import {inspectWasmBytes} from "./inspect.mjs";
+const MAX_GUEST_BYTES=1048576;
 let phase="NEW",contract=null,guest=null,lastTicket=0,handling=false,stopPending=false;
 const ownedBytes=value=>{
- if(value instanceof SharedArrayBuffer)return null;
+ const isShared=b=>typeof SharedArrayBuffer!=="undefined"&&b instanceof SharedArrayBuffer;
+ if(isShared(value))return null;
  if(value instanceof ArrayBuffer)return new Uint8Array(value);
- if(ArrayBuffer.isView(value)&&!(value.buffer instanceof SharedArrayBuffer))
+ if(ArrayBuffer.isView(value)&&!isShared(value.buffer))
   return new Uint8Array(value.buffer,value.byteOffset,value.byteLength);
  return null;
 };
@@ -25,7 +27,7 @@ function panic(){
  self.postMessage({kind:"oreslang-v2-panic"});
 }
 async function load(data){
- let owned=null;
+ let owned=null,inspected=null;
  try{
   if(phase!=="NEW"||data.kind!=="oreslang-v2-source-init"||
     data.descriptor!=="I"||!validateActorMessageV2Contract(data)||
@@ -39,7 +41,12 @@ async function load(data){
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",owned)))
    .map(x=>x.toString(16).padStart(2,"0")).join("");
   if(hash!==data.wasmSha256)throw Error("compiled actor digest mismatch");
-  const module=await WebAssembly.compile(owned);
+  // Require a fixed two-page maximum, no start function, no table, and no
+  // unbounded memory growth. Compile the exact inspected private snapshot.
+  inspected=inspectWasmBytes(owned,{maxModuleBytes:MAX_GUEST_BYTES,maxMemoryPages:2});
+  if(inspected.memoryCount!==1||!inspected.hasMemoryMaximum)
+   throw Error("compiled actor requires bounded guest memory");
+  const module=await WebAssembly.compile(inspected.bytes);
   if(WebAssembly.Module.imports(module).length!==0)
    throw Error("compiled actor has forbidden imports");
   const exports=WebAssembly.Module.exports(module);
@@ -57,7 +64,7 @@ async function load(data){
   contract={schemaId:data.schemaId,descriptor:"I"};
   phase="ACTIVE";
   self.postMessage({kind:"oreslang-v2-ready"});
- }catch{panic()}finally{scrub(owned);scrub(data.wasm)}
+ }catch{panic()}finally{scrub(inspected?.bytes);scrub(owned);scrub(data.wasm)}
 }
 function stop(){
  if(phase!=="ACTIVE"||handling)return;
