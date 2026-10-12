@@ -71,10 +71,25 @@ and one Wasm instance per dedicated Worker. This is distinct from scalar
 The host must provide a stable, non-secret `actorKey` to
 `createActorMessageTransport({schemaId,descriptor:"I",guest,actorKey})`.
 Within one JavaScript agent, this key is admitted at most once until
-`Worker.terminate()` has completed. Unlike an ordinary response ACK,
-`drain()`, `stop()` and `get_done()` settle only after termination
-confirmation. Failed termination **retains the actor identity lease**,
-preventing local speculative replacement.
+**either** an awaitable Worker retirement has resolved **or** the actor's
+trusted STOPPED CONTROL receipt proves that guest execution and teardown
+have already completed.
+
+Node worker_threads adapters provide an awaitable `terminate()`.
+Browser `Worker.terminate()` returns **void** and cannot prove that an
+aborted or noncooperative guest has exited. In that case cancellation,
+terminal PANIC or a failed adapter keeps the identity reserved, and
+`get_done()` rejects with unconfirmed retirement. Only a validated clean
+STOPPED receipt allows an identity to be released after void termination.
+This deliberately fails closed rather than incorrectly licensing an
+overlapping replacement on another Worker.
+
+The parent Browser integration also experiments with
+`oreslang-v2-source-init` and the separate
+`oreslang_wasm_actor_{init,on_message,teardown}` export ABI. It is
+**not** interchangeable with the actor-specific `actor-i64-v1` manifest
+and exports in this PR. They require an explicit compiler/runtime ABI
+migration and conformance decision before a public stable actor ABI.
 
 Every hosted incarnation additionally has an unpredictable 128-bit
 `incarnation` value created through `crypto.getRandomValues`.
