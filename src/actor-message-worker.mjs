@@ -19,20 +19,16 @@ function scrubOwnedFrame(frame){
 }
 self.addEventListener("message",async event=>{
  const data=event?.data;
+ // Panic and completed drain are absorbing terminal states. In particular,
+ // an invalid pre-READY INIT can never be followed by a valid second INIT.
+ if(closed){scrubOwnedFrame(data?.frame);return}
  if(!data||typeof data!=="object")return panic();
  if(!ready){
-  // Validate the same ASCII/byte envelope admitted by the canonical codec
-  // BEFORE publishing READY. A malformed direct INIT must fail as CONTROL
-  // panic rather than claiming that this Worker can receive typed DATA.
-  if(data.kind!=="oreslang-v2-init"||
-    typeof data.schemaId!=="string"||data.schemaId.length>256||
-    !/^[\x21-\x7e]{1,256}$/.test(data.schemaId)||
-    typeof data.descriptor!=="string"||data.descriptor.length>4096||
-    !/^[\x21-\x7e]{1,4096}$/.test(data.descriptor)){
+  if(data.kind!=="oreslang-v2-init"){
    scrubOwnedFrame(data.frame);return panic();
   }
-  // A syntactically invalid but printable descriptor must never receive a
-  // READY acknowledgement before its first DATA. Parser complexity is bounded.
+  // Same bounded canonical parser as host admission and DATA decoding.
+  // Refuse a forged INIT before returning READY to the caller.
   try{validateActorMessageV2Contract(data)}
   catch{scrubOwnedFrame(data.frame);return panic()}
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
@@ -40,7 +36,6 @@ self.addEventListener("message",async event=>{
   self.postMessage({kind:"oreslang-v2-ready"});
   return;
  }
- if(closed){scrubOwnedFrame(data.frame);return}
  if(data.kind==="oreslang-v2-control"&&data.action==="drain"){
   stopPending=true;
   if(!handling){closed=true;self.postMessage({kind:"oreslang-v2-stopped"})}
