@@ -399,7 +399,7 @@ test("malformed printable actor descriptors are denied before Worker allocation"
  for(const descriptor of ["T[S","T[Q]","L[]","T[S,I]]"]){
   assert.throws(
    ()=>createActorMessageTransport({...spec,descriptor,workerFactory:factory}),
-   /invalid schema or descriptor shape/
+   /invalid schema or descriptor\/
   );
  }
  assert.equal(allocated,0);
@@ -446,5 +446,35 @@ test("detached active frame cannot prevent cancellation cleanup",async()=>{
  assert.equal(await actor.send(["detach-stop",3n]),true);
  await assert.rejects(actor.stop(),/cancelled/);
  assert.equal(actor.pending,0);
+ assert.equal(terminated,1);
+});
+
+test("deep and malformed canonical INIT shapes never allocate a Worker",()=>{
+ let allocations=0;
+ const factory=()=>{allocations++;throw Error("must not create Worker")};
+ for(const descriptor of [
+  "T[S,]","A[]","T[S,,I]","T[S,I]junk",
+  "A[".repeat(65)+"I"+"]".repeat(65),
+  "T[".repeat(65)+"I"+"]".repeat(65),
+ ]){
+  assert.throws(()=>createActorMessageTransport({...spec,descriptor,workerFactory:factory}),
+   /invalid schema or descriptor/);
+ }
+ assert.equal(allocations,0);
+});
+
+test("nested canonical INIT shape is admitted by the same preflight as the codec",async()=>{
+ let init,terminated=0;
+ const factory=()=>({
+  addEventListener(){},removeEventListener(){},
+  postMessage(m){if(m.kind==="oreslang-v2-init")init=m},
+  terminate(){terminated++}
+ });
+ const shape="T[A[I],FL[B,S]]";
+ const actor=createActorMessageTransport({
+  schemaId:"example.Compute#variant=1",descriptor:shape,workerFactory:factory
+ });
+ assert.deepEqual(init,{kind:"oreslang-v2-init",schemaId:"example.Compute#variant=1",descriptor:shape});
+ await assert.rejects(actor.stop(),/cancelled/);
  assert.equal(terminated,1);
 });
