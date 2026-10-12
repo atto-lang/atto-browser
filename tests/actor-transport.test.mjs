@@ -391,3 +391,16 @@ test("oversized or empty Worker INIT metadata fails before Worker allocation",()
  }
  assert.equal(started,0);
 });
+
+
+test("malformed printable actor descriptors are denied before Worker allocation",()=>{
+ let allocated=0;
+ const factory=()=>{allocated++;throw Error("must not allocate carrier")};
+ for(const descriptor of ["T[S","T[Q]","L[]","T[S,I]]"]){
+  assert.throws(
+   ()=>createActorMessageTransport({...spec,descriptor,workerFactory:factory}),
+   /invalid schema or descriptor shape/
+  );
+ }
+ assert.equal(allocated,0);
+});
