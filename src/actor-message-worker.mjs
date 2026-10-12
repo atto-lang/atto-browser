@@ -179,8 +179,8 @@ self.addEventListener("message",async event=>{
  if(data.kind==="oreslang-v2-control"&&data.action==="drain"){
   stopPending=true;
   if(!handling){
-   closed=true;
    try{disposeGuest()}catch{return panic()}
+   closed=true;
    self.postMessage(tagged({kind:"oreslang-v2-stopped"}))
   }
   return;
@@ -217,8 +217,8 @@ self.addEventListener("message",async event=>{
   scrubOwnedFrame(data.frame);
   handling=false;
   if(stopPending&&!closed){
-   closed=true;
    try{disposeGuest()}catch{return panic()}
+   closed=true;
    self.postMessage(tagged({kind:"oreslang-v2-stopped"}))
   }
  }
