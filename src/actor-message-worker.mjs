@@ -5,7 +5,9 @@
  */
 import {decodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 let ready=false,closed=false,handling=false,stopPending=false,initializing=false,contract,lastTicket=0;
-let guestHandler=null;
+let guestHandler=null,actorIncarnation=null;
+const tagged=message=>({ ...message,
+ ...(actorIncarnation===null?{}:{incarnation:actorIncarnation}) });
 const MAX_WASM_BYTES=16*1024*1024;
 // This Worker owns exactly one Wasm instance and never exposes its fields.
 function hasStartSection(bytes){
@@ -130,13 +132,19 @@ self.addEventListener("message",async event=>{
   initializing=true;
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
   if(data.guest!==undefined){
+   if(typeof data.incarnation!=="string"||
+      !/^[0-9a-f]{32}$/.test(data.incarnation)){
+    scrubOwnedFrame(data.guest?.wasmBytes);
+    return panic();
+   }
+   actorIncarnation=data.incarnation;
    if(data.descriptor!=="I"){scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
    try{guestHandler=await loadActorGuest(data.guest)}
    catch{scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
   }
   if(closed)return;
   ready=true;
-  self.postMessage({kind:"oreslang-v2-ready"});
+  self.postMessage(tagged({kind:"oreslang-v2-ready"}));
   return;
  }
  if(closed){
@@ -144,12 +152,20 @@ self.addEventListener("message",async event=>{
   scrubOwnedFrame(data.guest?.wasmBytes);
   return
  }
+ // The incarnation is an exact capability for this Worker lifetime.
+ // A stale queued DATA/CONTROL message from a previous actor incarnation
+ // must not reach compiled guest code, mutate its state or stop this actor.
+ if(actorIncarnation!==null&&data.incarnation!==actorIncarnation){
+  scrubOwnedFrame(data.frame);
+  scrubOwnedFrame(data.guest?.wasmBytes);
+  return panic();
+ }
  if(data.kind==="oreslang-v2-control"&&data.action==="drain"){
   stopPending=true;
   if(!handling){
    closed=true;
    guestHandler=null;
-   self.postMessage({kind:"oreslang-v2-stopped"})
+   self.postMessage(tagged({kind:"oreslang-v2-stopped"}))
   }
   return;
  }
@@ -176,8 +192,8 @@ self.addEventListener("message",async event=>{
    throw Error("compiled actor handler must return signed i64");
   // A concurrent malformed/replayed DATA can trigger a terminal panic
   // while the SHA-256 digest is pending. Never ACK after that CONTROL event.
-  if(!closed)self.postMessage({kind:"oreslang-v2-receipt",id:data.id,ok:true,
-   ...(guestHandler===null?{}:{result:actorResult})});
+  if(!closed)self.postMessage(tagged({kind:"oreslang-v2-receipt",id:data.id,ok:true,
+   ...(guestHandler===null?{}:{result:actorResult})}));
  }catch{panic();return}
  finally{
   // The decode procedure copies untrusted bytes before its crypto await;
@@ -197,5 +213,5 @@ function panic(){
  // retain an executable actor entry point after terminal shutdown.
  guestHandler=null;
  // No user-defined actor hook may intercept this terminal CONTROL failure.
- self.postMessage({kind:"oreslang-v2-panic"});
+ self.postMessage(tagged({kind:"oreslang-v2-panic"}));
 }
