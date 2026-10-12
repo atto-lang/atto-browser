@@ -399,7 +399,7 @@ test("malformed printable actor descriptors are denied before Worker allocation"
  for(const descriptor of ["T[S","T[Q]","L[]","T[S,I]]"]){
   assert.throws(
    ()=>createActorMessageTransport({...spec,descriptor,workerFactory:factory}),
-   /invalid schema or descriptor\/
+   /invalid schema or descriptor/
   );
  }
  assert.equal(allocated,0);
