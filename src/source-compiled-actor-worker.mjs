@@ -19,11 +19,17 @@ const ownedBytes=value=>{
 function scrub(value){
  try{ownedBytes(value)?.fill(0)}catch{}
 }
+// Take ownership of the guest before invoking untrusted/destructing Wasm.
+// A teardown trap must never cause supervisor panic to invoke teardown twice.
+function retireGuest(){
+ const retiring=guest;
+ guest=null;
+ retiring?.oreslang_wasm_actor_teardown();
+}
 function panic(){
  if(phase==="STOPPED"||phase==="PANICKED")return;
  phase="PANICKED";
- try{guest?.oreslang_wasm_actor_teardown()}catch{}
- guest=null;
+ try{retireGuest()}catch{}
  self.postMessage({kind:"oreslang-v2-panic"});
 }
 async function load(data){
@@ -75,9 +81,9 @@ async function load(data){
 }
 function stop(){
  if(phase!=="ACTIVE"||handling)return;
- try{guest.oreslang_wasm_actor_teardown()}
+ try{retireGuest()}
  catch{panic();return}
- guest=null;phase="STOPPED";
+ phase="STOPPED";
  self.postMessage({kind:"oreslang-v2-stopped"});
 }
 self.addEventListener("message",async event=>{
