@@ -149,3 +149,44 @@ test("actor reservation expires even if WebCrypto encoding never settles",{timeo
   actor.close();
  }
 });
+
+
+test("a valid envelope with the wrong response variant cannot satisfy a pending Compute reply",async()=>{
+ let onMessage,terminated=0;
+ const fake=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-owned-actor-init-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-ready-v1",ok:true}}));
+   if(msg.kind==="oreslang-owned-actor-request-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-reply-v1",id:msg.id,ok:true,bytes:msg.bytes}}));
+  },
+  terminate(){terminated++}
+ });
+ const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:1000});
+ await assert.rejects(actor.request(compute("wrong-reply",4)),/unadmitted actor Worker reply variant/);
+ assert.equal(actor.pending,0);
+ assert.equal(terminated,1);
+});
+
+test("unadmitted inbound Result never allocates or dispatches an actor request",async()=>{
+ let onMessage,requestsPosted=0,terminated=0;
+ const fake=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-owned-actor-init-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-ready-v1",ok:true}}));
+   if(msg.kind==="oreslang-owned-actor-request-v1")requestsPosted++;
+  },
+  terminate(){terminated++}
+ });
+ const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:1000});
+ try{
+  await assert.rejects(actor.request(result("not-a-request",1)),/unadmitted actor Worker request variant/);
+  assert.equal(actor.pending,0);
+  assert.equal(requestsPosted,0);
+ }finally{actor.close()}
+ assert.equal(terminated,1);
+});
