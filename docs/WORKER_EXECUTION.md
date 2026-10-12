@@ -60,3 +60,48 @@ of compiler-generated Oreslang actor handlers, Java/LLVM source conformance,
 arbitrary guest safety, or a trustworthy sandbox. The browser implementation
 still requires supervision, cancellation and actual guest-actor lowering
 end-to-end before production release.
+
+
+## Compiled synchronous source actors — process-local incarnation gate
+
+PR #14 adds a separately typed `oreslang.core-wasm.actor-i64-v1` artifact
+and one Wasm instance per dedicated Worker. This is distinct from scalar
+`main()` and does not permit source-level suspension or actor spawning.
+
+The host must provide a stable, non-secret `actorKey` to
+`createActorMessageTransport({schemaId,descriptor:"I",guest,actorKey})`.
+Within one JavaScript agent, this key is admitted at most once until
+`Worker.terminate()` has completed. Unlike an ordinary response ACK,
+`drain()`, `stop()` and `get_done()` settle only after termination
+confirmation. Failed termination **retains the actor identity lease**,
+preventing local speculative replacement.
+
+Every hosted incarnation additionally has an unpredictable 128-bit
+`incarnation` value created through `crypto.getRandomValues`.
+INIT, DATA and CONTROL carry it; the Worker echoes it on READY, receipts,
+STOPPED and terminal PANIC. Mismatching tickets never execute Oreslang
+guest code. During an asynchronous MessagePack digest, the Worker
+rechecks its closed state immediately before executing its source-level
+handler, preventing a replay-induced terminal panic from being followed
+by unacknowledged guest execution.
+
+**Scope of guarantee:** one cooperating host JavaScript agent and its
+dedicated Worker carriers; **not** shared across browser tabs, host
+processes, machines, supervisors, and other execution agents.
+The `actorKey` is an identity, not a cryptographic grant.
+The `incarnation` token is defense against stale messages, not a
+fencing token for databases or network side effects. A future supervisor
+must coordinate actor incarnations, enforce one live execution lease
+across carriers, and attach nonwrapping fencing epochs to every external
+effect before source-level asynchronous actor migration is allowed.
+
+The real-browser gate requires exact, native-LLVM-compiled actor Wasm and
+its pinned manifest and will **not** skip either engine:
+
+```sh
+npm install --no-save --no-package-lock --ignore-scripts playwright@1.56.1
+npx playwright install --with-deps chromium firefox
+ORE_REAL_ACTOR_WASM=/absolute/path/counter.wasm \
+ORE_REAL_ACTOR_MANIFEST=/absolute/path/counter.wasm.artifact.json \
+node scripts/verify-compiled-actor-browser.mjs
+```
