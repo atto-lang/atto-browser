@@ -290,3 +290,27 @@ test("codec rejects oversize ArrayBuffer and view before allocation/hash work",a
  const tiny=new ArrayBuffer(43);
  await assert.rejects(decodeMessage(schema,tiny),/invalid message size/);
 });
+
+
+test("host rejects request variant getter without executing it or reserving capacity",async()=>{
+ let onMessage,invocations=0,requests=0;
+ const fake=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-owned-actor-init-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-ready-v1",ok:true}}));
+   if(msg.kind==="oreslang-owned-actor-request-v1")requests++;
+  },
+  terminate(){}
+ });
+ const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:500});
+ try{
+  const hostile={fields:{text:"oops",n:1n}};
+  Object.defineProperty(hostile,"variant",{enumerable:true,get(){invocations++;return "Compute"}});
+  await assert.rejects(actor.request(hostile),/unadmitted actor Worker request variant/);
+  assert.equal(invocations,0);
+  assert.equal(actor.pending,0);
+  assert.equal(requests,0);
+ }finally{actor.close()}
+});
