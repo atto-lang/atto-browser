@@ -9,6 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "node tests/real-browser-e2e.mjs"
   }
 }
