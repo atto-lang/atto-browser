@@ -158,3 +158,15 @@ test("malformed cancellation token fails before spawning Worker",()=>{
   wasmBytes:wasm,manifest:artifact,signal:{aborted:false}
  }),/AbortSignal/);
 });
+
+test("oversized Wasm inputs are rejected before any snapshot allocation or worker creation",()=>{
+ let spawned=false;
+ const create=()=>{spawned=true;throw Error("should never spawn")};
+ const huge=new Uint8Array(4*1024*1024);
+ for(const input of [huge,huge.buffer,new DataView(huge.buffer)]){
+  assert.throws(()=>runVerifiedCoreGuestInWorker({
+    wasmBytes:input,manifest:artifact,workerFactory:create,maxModuleBytes:1024
+  }),/Wasm module exceeds host byte budget/);
+ }
+ assert.equal(spawned,false);
+});

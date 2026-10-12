@@ -1,3 +1,4 @@
+import {snapshotCoreManifest} from "./core-manifest-snapshot.mjs";
 /**
  * Single-shot browser Worker admission for a SHA-256 pinned core-i64 Wasm guest.
  * This is isolation for pure scalar guests, NOT an Oreslang actor runtime.
@@ -5,7 +6,7 @@
  */
 const signedI64=/^(?:0|-?[1-9][0-9]*)$/;
 const fail=x=>{throw new TypeError("Oreslang Worker: "+x)};
-function snapshotBytes(input){
+function snapshotBytes(input,maxModuleBytes){
  let bytes;
  if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
  else if(ArrayBuffer.isView(input)) {
@@ -13,6 +14,7 @@ function snapshotBytes(input){
    fail("shared memory not admitted");
   bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
  }else fail("expected Wasm ArrayBuffer or typed array");
+ if(bytes.byteLength>maxModuleBytes)fail("Wasm module exceeds host byte budget");
  return Uint8Array.from(bytes);
 }
 function validInt(x,min,max,name){
@@ -32,11 +34,9 @@ export function runVerifiedCoreGuestInWorker({
  // An already aborted request must not create a Worker or allocate guest memory.
  if(signal?.aborted)return Promise.reject(new Error("isolated Wasm worker aborted"));
  // Snapshot before any worker creation, event registration or async operation.
- const bytes=snapshotBytes(wasmBytes);
+ const bytes=snapshotBytes(wasmBytes,maxModuleBytes);
  if(bytes.length>maxModuleBytes)fail("Wasm module exceeds host byte budget");
- let admittedManifest;
- try{admittedManifest=JSON.parse(JSON.stringify(manifest));}
- catch{fail("invalid artifact manifest serialization");}
+ const admittedManifest=snapshotCoreManifest(manifest);
  if(!admittedManifest||typeof admittedManifest!=="object"||Array.isArray(admittedManifest))
   fail("invalid artifact manifest");
  const create=workerFactory||(()=>{
