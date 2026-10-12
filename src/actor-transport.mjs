@@ -9,20 +9,11 @@ export function createActorMessageTransport({
  schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic,
  maxFrameBytes=1048576,maxReservedBytes=4194304
 }={}){
- // INIT is posted before DATA reservation; bound metadata separately so a
- // caller cannot allocate/clone arbitrarily large strings outside quotas.
- if(typeof schemaId!=="string"||typeof descriptor!=="string"||
-    schemaId.length===0||descriptor.length===0||
-    schemaId.length>256||descriptor.length>4096||
-    !/^[\x21-\x7e]{1,256}$/.test(schemaId)||
-    !/^[\x21-\x7e]{1,4096}$/.test(descriptor)||
-    new TextEncoder().encode(schemaId).length>256||
-    new TextEncoder().encode(descriptor).length>4096)
-  fail("invalid schema or descriptor byte budget");
- // The shared codec parser checks the complete bounded descriptor grammar,
- // not merely ASCII and byte length, before any Worker can be allocated.
+ // The codec owns canonical schema/shape validation. Check the full
+ // grammar before Worker allocation, without a second parser or UTF-8 copy.
+ // Malformed contracts cannot consume a carrier, even when DATA is never sent.
  try{validateActorMessageV2Contract({schemaId,descriptor})}
- catch{fail("invalid schema or descriptor shape")}
+ catch{fail("invalid schema or descriptor byte budget/shape")}
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>4096)fail("invalid capacity");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid deadline");
  if(!Number.isSafeInteger(maxFrameBytes)||maxFrameBytes<64||maxFrameBytes>1048576)fail("invalid frame byte budget");
