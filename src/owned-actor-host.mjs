@@ -61,6 +61,12 @@ export function createOwnedActorWorker({
    return;
   }
   const entry=outstanding.get(data.id);
+  // Correlation alone is insufficient: a reserved but never published ID
+  // cannot be completed by an unsolicited early Worker event.
+  if(!entry.sent){
+   cancelAll(new Error("reply before actor Worker request publication"));
+   return;
+  }
   if(entry.verifying){
    cancelAll(new Error("duplicate actor Worker response"));
    return;
@@ -119,6 +125,9 @@ export function createOwnedActorWorker({
   const posted=transmit.then(async()=>{
    const bytes=await encoded;
    if(closed)throw Error("actor closed");
+   // Mark as published before postMessage: a synchronous test shim may send
+   // its response reentrantly while postMessage is still on the stack.
+   entry.sent=true;
    // No transfer list: ownership is copied across the isolated Worker.
    worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
   });
