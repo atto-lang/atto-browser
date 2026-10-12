@@ -97,7 +97,10 @@ export function createOwnedActorWorker({
   // posted it and before request() returns it. Observe it immediately to
   // avoid a transient unhandled rejection; callers still receive rejection.
   result.catch(()=>{});
-  const entry={resolve,reject,timer:undefined};
+  // The deadline covers encoding, FIFO admission and the Worker response.
+  // A blocked WebCrypto digest must not keep a reserved slot forever.
+  const entry={resolve,reject,timer:setTimeout(
+   ()=>cancelAll(new Error("actor Worker deadline exceeded")),timeoutMs)};
   outstanding.set(id,entry);
   // Serialize immediately so a caller mutation after request() cannot
   // change payload bytes. Then preserve admission order across asynchronous
@@ -107,16 +110,18 @@ export function createOwnedActorWorker({
   const posted=transmit.then(async()=>{
    const bytes=await encoded;
    if(closed)throw Error("actor closed");
-   entry.timer=setTimeout(()=>cancelAll(new Error("actor Worker deadline exceeded")),timeoutMs);
    // No transfer list: ownership is copied across the isolated Worker.
    worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
   });
   transmit=posted.catch(()=>{});
-  try{await posted;}catch(error){
+  // Return the reserved result immediately: waiting on posted would defeat
+  // the admission deadline if async hashing or queued admission stalls.
+  posted.catch(error=>{
+   if(closed)return; // cancelAll already rejected every reserved promise.
    clearTimeout(entry.timer);
    outstanding.delete(id);
-   reject(error);
-  }
+   entry.reject(error);
+  });
   return result;
  };
  return new Promise((resolve,reject)=>{
