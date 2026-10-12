@@ -214,3 +214,29 @@ test("reserved-but-unpublished request cannot be completed by a guessed Worker r
  assert.equal(actor.pending,0);
  assert.equal(posted,0);
 });
+
+
+test("sparse contract variants, fields and enum alternatives fail before schema hashing",async()=>{
+ const normal={id:1,name:"Compute",fields:[{name:"n",type:"i64"}]};
+ const variants=[normal];variants.length=2;
+ const badVariants={schemaVersion:1,ownership:"copy",variants};
+ await assert.rejects(encodeMessage(badVariants,{variant:"Compute",fields:{n:1n}}),/sparse contract variants/);
+ await assert.rejects(decodeMessage(badVariants,Uint8Array.of(0)),/sparse contract variants/);
+ const fields=[{name:"n",type:"i64"}];fields.length=2;
+ const badFields={schemaVersion:1,ownership:"copy",variants:[{...normal,fields}]};
+ await assert.rejects(encodeMessage(badFields,{variant:"Compute",fields:{n:1n}}),/sparse variant fields/);
+ const alts=[{id:1,name:"None",payload:null}];alts.length=2;
+ const badEnum={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields:[{name:"state",type:{enum:alts}}]}]};
+ await assert.rejects(encodeMessage(badEnum,{variant:"Compute",fields:{state:{variant:"None",value:null}}}),/sparse enum alternatives/);
+});
+
+test("schema arrays cannot hide custom map methods or accessor elements",async()=>{
+ const variants=[{id:1,name:"Compute",fields:[]}];
+ variants.map=()=>[];
+ const spoof={schemaVersion:1,ownership:"copy",variants};
+ await assert.rejects(encodeMessage(spoof,{variant:"Compute",fields:{}}),/noncanonical contract variants/);
+ const fields=[{name:"n",type:"i64"}];
+ Object.defineProperty(fields,"0",{get(){throw Error("getter invoked")},enumerable:true,configurable:true});
+ const accessor={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields}]};
+ await assert.rejects(encodeMessage(accessor,{variant:"Compute",fields:{n:1n}}),/accessor variant fields/);
+});
