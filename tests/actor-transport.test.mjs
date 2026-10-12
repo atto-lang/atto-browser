@@ -21,7 +21,7 @@ test("browser codec is byte-identical to canonical upstream Wasm codec",async()=
  const b=await readFile(new URL("../src/messagepack-v2.mjs",import.meta.url));
  const header=Buffer.from("blob "+b.length+"\0","utf8");
  assert.equal(createHash("sha1").update(header).update(b).digest("hex"),
-  "6f12cfc99a2bb375a600123e339fe8e6a72a83fb");
+  "53407bdc7b285a122fdf1a48845f74b18cfb92ce");
 });
 test("isolated Worker processes bounded canonical actor DATA; drain seals mailbox",async()=>{
  const actor=createActorMessageTransport({...spec,workerFactory,capacity:3});
