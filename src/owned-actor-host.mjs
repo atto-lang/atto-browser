@@ -101,7 +101,10 @@ export function createOwnedActorWorker({
   if(!ready)throw Error("actor not ready");
   // Reference Worker supports Compute requests only. Fail before consuming an
   // ID, allocating a deadline or sending an unadmitted variant to the Worker.
-  if(message?.variant!=="Compute")throw Error("unadmitted actor Worker request variant");
+  const variant=message!==null&&typeof message==="object"
+   ?Object.getOwnPropertyDescriptor(message,"variant"):undefined;
+  if(!variant||!Object.hasOwn(variant,"value")||variant.value!=="Compute")
+   throw Error("unadmitted actor Worker request variant");
   if(outstanding.size>=maxPending)throw Error("actor Worker pending limit exceeded");
   if(nextId>Number.MAX_SAFE_INTEGER)throw Error("actor request ID exhausted");
   const id=nextId++;
