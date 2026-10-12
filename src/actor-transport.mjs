@@ -5,6 +5,20 @@
  */
 import {encodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
+/* Worker adapters may detach/transfer postMessage frames. A failed scrub
+ * must never abort terminalization, release the incarnation lease early, or
+ * turn a successful receipt into a second actor execution. */
+function scrubOwned(value) {
+ if(value===null||value===undefined)return;
+ try {
+  const bytes=value instanceof ArrayBuffer?new Uint8Array(value):
+   ArrayBuffer.isView(value)?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):null;
+  if(bytes&&!(typeof SharedArrayBuffer!=="undefined"&&bytes.buffer instanceof SharedArrayBuffer))
+   bytes.fill(0);
+ }catch{
+  // Detached host allocations can no longer be read or written.
+ }
+}
 // This process-local authority is deliberately not a cross-tab or cross-host
 // lock. A guest actorKey cannot be reused until its carrier terminates.
 const activeIncarnations=new Map();
@@ -64,7 +78,7 @@ export function createActorMessageTransport({
  const incarnation=guest===undefined?null:newIncarnation();
  if(actorKey!==undefined){
   if(activeIncarnations.has(actorKey)){
-   guestBytes?.fill(0);
+   scrubOwned(guestBytes);
    fail("actor incarnation still active or termination unconfirmed");
   }
   activeIncarnations.set(actorKey,incarnation);
@@ -75,7 +89,7 @@ export function createActorMessageTransport({
  });
  let worker;
  try{worker=create()}catch(error){
-  guestBytes?.fill(0);
+  scrubOwned(guestBytes);
   if(actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
    activeIncarnations.delete(actorKey);
   throw error
@@ -83,7 +97,7 @@ export function createActorMessageTransport({
  if(!worker||["postMessage","addEventListener","removeEventListener","terminate"].some(x=>typeof worker[x]!=="function")){
   // A broken factory may already have allocated a live OS Worker before
   // returning an incomplete adapter. Revoke it rather than leaking a carrier.
-  guestBytes?.fill(0);
+  scrubOwned(guestBytes);
   // Terminate at most once. Never release an identity until its carrier
   // confirms retirement; an unconfirmed carrier retains the fence.
   try{
@@ -129,13 +143,13 @@ export function createActorMessageTransport({
   // unresolved admission futures waiting on untrusted crypto providers.
   for(const item of queue){
    item.abort?.(error||Error("actor stopped"));
-   item.frame?.fill(0);
+   scrubOwned(item.frame);
    item.frame=null;
   }
   queue.length=0;
   // The active frame belongs to this mailbox until an internal delivery
   // receipt; cancellation/panic must scrub it, too.
-  active?.frame?.fill(0);
+  scrubOwned(active?.frame);
   active=null;pending=0;
   cleanup().then(()=>{
    if(error){
@@ -200,7 +214,7 @@ export function createActorMessageTransport({
    clear();
    // Worker postMessage uses structured clone (no transfer list). The host
    // must not retain a second copy of a processed DATA frame.
-   active.frame?.fill(0);
+   scrubOwned(active.frame);
    active.frame=null;active=null;pending--;pump();return
   }
   if(m.kind==="oreslang-v2-stopped"&&stopping&&active===null&&pending===0){complete();return}
@@ -215,7 +229,7 @@ export function createActorMessageTransport({
    worker.postMessage({kind:"oreslang-v2-init",schemaId,descriptor,
     ...(guestBytes===null?{}:{incarnation,
      guest:{wasmBytes:guestBytes,manifest:guest.manifest}})});
-  }finally{guestBytes?.fill(0)}
+  }finally{scrubOwned(guestBytes)}
   if(!ready&&!finished)arm();
  }catch{
   // Even a partially registered custom Worker adapter must never leak its
@@ -245,7 +259,7 @@ export function createActorMessageTransport({
     // The encode promise can finish after stop() already rejected the
     // admission race. Scrub that late owned frame rather than abandoning it.
     const encoding=encodeActorMessageV2({schemaId,descriptor,value,maxBytes:maxFrameBytes})
-     .then(frame=>{if(finished)frame.fill(0);return frame});
+     .then(frame=>{if(finished)scrubOwned(frame);return frame});
     const frame=await Promise.race([encoding,cancelled,admissionDeadline]);
     if(finished)fail("actor stopped during message admission");
     item.frame=frame;
@@ -259,7 +273,7 @@ export function createActorMessageTransport({
    }catch(error){
     if(!finished){
      pending--;const pos=queue.indexOf(item);if(pos>=0)queue.splice(pos,1);
-     item.frame?.fill(0);item.frame=null;
+     scrubOwned(item.frame);item.frame=null;
     }
     pump();throw error
    }finally{
