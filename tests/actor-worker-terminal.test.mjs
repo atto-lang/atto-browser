@@ -46,3 +46,30 @@ test("in-flight decode must not ACK after concurrent terminal CONTROL panic",asy
   else delete globalThis.crypto;
  }
 });
+
+test("terminal INIT panic is absorbing: never reinitialize or ACK DATA",async()=>{
+ const originalSelf=Object.getOwnPropertyDescriptor(globalThis,"self");
+ let handler;const sent=[];
+ try{
+  Object.defineProperty(globalThis,"self",{configurable:true,value:{
+   addEventListener(kind,fn){if(kind==="message")handler=fn},
+   postMessage(message){sent.push(message)}
+  }});
+  await import("../src/actor-message-worker.mjs?terminal-init-regression=reconciled");
+  assert.equal(typeof handler,"function");
+  await handler({data:{kind:"oreslang-v2-init",schemaId:"x",descriptor:"T[I,]"}});
+  assert.deepEqual(sent,[{kind:"oreslang-v2-panic"}]);
+  // Invalid INIT must seal the endpoint permanently; a subsequent valid
+  // contract and DATA may neither advertise READY nor acknowledge tickets.
+  await handler({data:{kind:"oreslang-v2-init",schemaId:"x",descriptor:"I"}});
+  const abandonedFrame=Uint8Array.from([0x91,0x01]);
+  await handler({data:{kind:"oreslang-v2-data",id:1,frame:abandonedFrame}});
+  await handler({data:null});
+  assert.deepEqual(sent,[{kind:"oreslang-v2-panic"}]);
+  assert.deepEqual(Array.from(abandonedFrame),[0,0],
+   "post-panic Worker-owned frame is scrubbed");
+ }finally{
+  if(originalSelf)Object.defineProperty(globalThis,"self",originalSelf);
+  else delete globalThis.self;
+ }
+});
