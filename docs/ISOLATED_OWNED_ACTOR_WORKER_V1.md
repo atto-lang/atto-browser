@@ -10,15 +10,21 @@ a production supervisor runtime.
 Host source `src/owned-actor-host.mjs` and Worker
 `src/owned-actor-worker.mjs` exchange **only** SHA-256-checked ORM1 copied
 binary envelopes. They share no actor state or mutable memory. The worker
-loads exact vetted source Git blobs, copied from Wasm #16:
+started with the source Git blobs copied from Wasm #16:
 
-- `src/owned-message/owned-envelope.mjs`: source blob
-  `c9f4f6031cc6b3cfbbb2d2015b19d5d797433190`
-- `src/owned-message/serial-actor-reference.mjs`: source blob
-  `2e4a7dcead0bc5eb4871281af126ee189be8d875`
+- `src/owned-message/owned-envelope.mjs`: originally
+  `c9f4f6031cc6b3cfbbb2d2015b19d5d797433190`; the browser copy
+  now diverges intentionally to reject sparse schema descriptors, sparse
+  tuple values and method-shadowed schema arrays. It is **not** still
+  byte-identical to the Wasm copy.
+- `src/owned-message/serial-actor-reference.mjs`: unchanged reference blob
+  `2e4a7dcead0bc5eb4871281af126ee189be8d875`.
 
-These source pins establish byte provenance for the host reference code, not
-any guest compiler toolchain or native ABI.
+For release evidence, pin the **current complete browser Git tree** and run
+its tests on an executing runner. Historical source pins establish provenance
+only; they are not proofs of the revised implementation or guest compiler ABI.
+The host additionally rejects replies before request publication and validates
+that the admitted request/reply variants are precisely Compute -> Result.
 
 The Worker admits a schema containing typed `Compute(text: string,n: i64)`
 and `Result(text: string,n: i64)`, then uses explicit
