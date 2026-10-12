@@ -17,6 +17,19 @@ function shape(x,keys,name){
  if(!plain(x)||Object.keys(x).some(k=>!keys.includes(k)))fail("invalid "+name+" shape");
 }
 function unique(a,label){if(new Set(a).size!==a.length)fail("duplicate "+label);}
+// Every schema-bearing array must contain exactly its declared own data
+// slots. Array.map() skips holes, and instance method shadowing must not
+// control normalization or the hashed contract identity.
+function denseSchemaArray(a,label,min,max){
+ if(!Array.isArray(a)||a.length<min||a.length>max)fail("invalid "+label);
+ if(Object.getPrototypeOf(a)!==Array.prototype||
+    Reflect.ownKeys(a).length!==a.length+1)fail("noncanonical "+label);
+ for(let i=0;i<a.length;i++){
+  const slot=Object.getOwnPropertyDescriptor(a,String(i));
+  if(!slot)fail("sparse "+label);
+  if(!Object.hasOwn(slot,"value"))fail("accessor "+label);
+ }
+}
 function name(x){if(typeof x!=="string"||!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(x))fail("invalid name");return x;}
 function id(x){if(!Number.isInteger(x)||x<1||x>65535)fail("invalid ID");return x;}
 function bound(x){if(!Number.isInteger(x)||x<0||x>ITEMS)fail("invalid element bound");return x;}
@@ -28,7 +41,7 @@ function type(t,d=0,ctx){
  const ks=Object.keys(t);if(ks.length!==1)fail("exactly one type required");
  const k=ks[0];
  if(k==="tuple"){
-  if(!Array.isArray(t.tuple)||t.tuple.length>64)fail("invalid tuple");
+  denseSchemaArray(t.tuple,"tuple descriptor",0,64);
   const elements=[];
   for(let i=0;i<t.tuple.length;i++){
    if(!Object.hasOwn(t.tuple,i))fail("sparse tuple descriptor");
@@ -41,7 +54,7 @@ function type(t,d=0,ctx){
   return {[k]:k==="array"?{element:type(t[k].element,d+1,ctx),length:bound(t[k].length)}
     :{element:type(t[k].element,d+1,ctx),maxLength:bound(t[k].maxLength)}};
  }
- if(!Array.isArray(t.enum)||t.enum.length<1||t.enum.length>256)fail("invalid enum");
+ denseSchemaArray(t.enum,"enum alternatives",1,256);
  const vs=t.enum.map(v=>{
   shape(v,["id","name","payload"],"enum variant");
   if(!Object.hasOwn(v,"payload"))fail("enum payload declaration required");
@@ -53,11 +66,11 @@ function type(t,d=0,ctx){
 function contract(c){
  shape(c,["schemaVersion","ownership","variants"],"contract");
  if(c.schemaVersion!==1||c.ownership!=="copy")fail("unsupported contract version/ownership");
- if(!Array.isArray(c.variants)||c.variants.length<1||c.variants.length>256)fail("invalid variants");
+ denseSchemaArray(c.variants,"contract variants",1,256);
  const ctx={nodes:0};
  const vs=c.variants.map(v=>{
   shape(v,["id","name","fields"],"variant");
-  if(!Array.isArray(v.fields)||v.fields.length>64)fail("invalid fields");
+  denseSchemaArray(v.fields,"variant fields",0,64);
   const fields=v.fields.map(f=>{shape(f,["name","type"],"field");return{name:name(f.name),type:type(f.type,0,ctx)}});
   unique(fields.map(f=>f.name),"field");
   return {id:id(v.id),name:name(v.name),fields};
