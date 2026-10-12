@@ -60,3 +60,18 @@ of compiler-generated Oreslang actor handlers, Java/LLVM source conformance,
 arbitrary guest safety, or a trustworthy sandbox. The browser implementation
 still requires supervision, cancellation and actual guest-actor lowering
 end-to-end before production release.
+
+## Experimental actor transport v2 INIT contract (Browser PR #15)
+
+The separate `createActorMessageTransport` actor-DATA prototype checks canonical
+MessagePack v2 schema and descriptor syntax **before** creating a dedicated
+Worker. The isolated actor endpoint independently checks direct INIT messages
+before acknowledging READY. The contract uses printable ASCII only, at most
+256 schema-ID bytes and 4096 shape-descriptor bytes, with bounded shape nesting
+and exact fixed/variable type syntax. Invalid INIT triggers terminal CONTROL
+panic without READY or DATA receipt.
+
+Terminal states are absorbing: cancellation, drain completion and panic must
+never be followed by reinitialization, READY or internal DATA receipt. New
+Worker INIT validation does not constitute source-level Oreslang actor execution,
+compiler actor lowering, or formal proof of single-flight scheduling.
