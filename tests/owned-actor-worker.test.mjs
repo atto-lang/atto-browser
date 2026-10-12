@@ -190,3 +190,27 @@ test("unadmitted inbound Result never allocates or dispatches an actor request",
  }finally{actor.close()}
  assert.equal(terminated,1);
 });
+
+
+test("reserved-but-unpublished request cannot be completed by a guessed Worker response",async()=>{
+ let onMessage,terminated=0,posted=0;
+ const fake=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-owned-actor-init-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-ready-v1",ok:true}}));
+   if(msg.kind==="oreslang-owned-actor-request-v1")posted++;
+  },
+  terminate(){terminated++}
+ });
+ const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:1000});
+ const inFlight=actor.request(compute("not-published",1));
+ inFlight.catch(()=>{});
+ // The reserved ID is predictable but cannot be answered before postMessage.
+ onMessage({data:{kind:"oreslang-owned-actor-reply-v1",id:1,ok:false}});
+ await assert.rejects(inFlight,/reply before actor Worker request publication/);
+ assert.equal(terminated,1);
+ assert.equal(actor.pending,0);
+ assert.equal(posted,0);
+});
