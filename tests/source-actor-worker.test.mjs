@@ -90,6 +90,6 @@ test("bounded host transport admits the real Wasm actor without changing origina
  assert.equal(await actor.send(2n),true);
  assert.equal(await actor.send(3n),true);
  await actor.drain();
- assert.deepEqual(g.wasmBytes,original,"caller-owned compiler artifact not mutated");
+ assert.deepEqual(Uint8Array.from(g.wasmBytes),original,"caller-owned compiler artifact not mutated");
  assert.equal(actor.pending,0);
 });
