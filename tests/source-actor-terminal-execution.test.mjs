@@ -44,14 +44,14 @@ test("terminal replay during digest prevents ALL subsequent compiled actor execu
   const wasm=Object.create(realWasm);
   wasm.instantiate=async (...args)=>{
    const instance=await realWasm.instantiate(...args);
-   return {exports:new Proxy(instance.exports,{
-    get(target,key){
-     const value=Reflect.get(target,key,target);
-     if(key===manifest.actor.onMessage&&typeof value==="function")
-      return (...params)=>{turns++;return value(...params)};
-     return value;
-    }
-   })};
+   const init=instance.exports[manifest.actor.init];
+   const handle=instance.exports[manifest.actor.onMessage];
+   // Keep original compiled Wasm functions, just instrument their entry.
+   // An ordinary object avoids Proxy invariants on Wasm export objects.
+   return {exports:{
+    [manifest.actor.init]:()=>init(),
+    [manifest.actor.onMessage]:(value)=>{turns++;return handle(value)}
+   }};
   };
   Object.defineProperty(globalThis,"WebAssembly",{configurable:true,value:wasm});
   await import("../src/actor-message-worker.mjs?terminal-execution-fence=1");
