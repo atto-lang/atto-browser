@@ -328,3 +328,18 @@ test("owned bytes ignore caller iterator, length and buffer getters",async()=>{
  assert.deepEqual([...roundtrip.fields.payload],[7,8,9]);
  assert.equal(invoked,0);
 });
+
+
+test("decode snapshots hostile buffer views using intrinsic byte slots",async()=>{
+ let accesses=0;
+ const wire=await encodeMessage(schema,compute("hostile-view",12));
+ const sources=[new Uint8Array(wire),new DataView(wire.buffer.slice(0)),wire.buffer.slice(0)];
+ for(const input of sources){
+  for(const key of ["byteLength","buffer","byteOffset"]){
+   Object.defineProperty(input,key,{configurable:true,get(){accesses++;throw Error("shadowed "+key)}});
+  }
+  const value=await decodeMessage(schema,input);
+  assert.deepEqual(value,compute("hostile-view",12));
+ }
+ assert.equal(accesses,0);
+});
