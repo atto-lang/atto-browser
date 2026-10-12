@@ -20,6 +20,9 @@ function scrubOwnedFrame(frame){
 }
 self.addEventListener("message",async event=>{
  const data=event?.data;
+ // Terminal panic and completed drain are absorbing states, even before READY.
+ // A second INIT must never resurrect a failed endpoint.
+ if(closed){scrubOwnedFrame(data?.frame);return}
  if(!data||typeof data!=="object")return panic();
  if(!ready){
   if(data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
@@ -33,7 +36,6 @@ self.addEventListener("message",async event=>{
   self.postMessage({kind:"oreslang-v2-ready"});
   return;
  }
- if(closed){scrubOwnedFrame(data.frame);return}
  if(data.kind==="oreslang-v2-control"&&data.action==="drain"){
   stopPending=true;
   if(!handling){closed=true;self.postMessage({kind:"oreslang-v2-stopped"})}
