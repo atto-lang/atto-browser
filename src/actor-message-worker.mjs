@@ -11,11 +11,11 @@ const MAX_WASM_BYTES=16*1024*1024;
 function hasStartSection(bytes){
  if(bytes.length<8||!bytes.slice(0,8).every((x,i)=>x===[0,97,115,109,1,0,0,0][i]))
   throw Error("invalid core Wasm header");
- let i=8;
- function u32(){
+ let i=8,hasBoundedMemory=false;
+ function u32(bound=bytes.length){
   let value=0;
   for(let j=0;j<5;j++){
-   if(i>=bytes.length)throw Error("truncated Wasm LEB128");
+   if(i>=bound)throw Error("truncated Wasm LEB128");
    const b=bytes[i++];
    if(j===4&&(b&0xf0))throw Error("invalid Wasm section size");
    value+=(b&127)*2**(7*j);
@@ -26,9 +26,23 @@ function hasStartSection(bytes){
  while(i<bytes.length){
   const id=bytes[i++],size=u32(),end=i+size;
   if(end>bytes.length)throw Error("truncated Wasm section");
+  if(id===5){
+   // Read the actual core-Wasm memory declaration, not merely a caller's
+   // artifact manifest. Importless guests have no other source of memory.
+   if(hasBoundedMemory)throw Error("multiple Wasm memory sections");
+   const count=u32(end);
+   if(count!==1)throw Error("exactly one guest Wasm memory required");
+   const flags=u32(end);
+   if(flags!==1)throw Error("guest Wasm memory must declare an ordinary maximum");
+   const min=u32(end),max=u32(end);
+   if(min>2||max!==2||i!==end)
+    throw Error("guest Wasm memory exceeds two-page ABI limit");
+   hasBoundedMemory=true;
+  }
   if(id===8)return true;
   i=end;
  }
+ if(!hasBoundedMemory)throw Error("bounded Wasm memory section missing");
  return false;
 }
 async function loadActorGuest({wasmBytes,manifest}={}){
