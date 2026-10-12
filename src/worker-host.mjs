@@ -14,8 +14,6 @@ function snapshotBytes(input,maxModuleBytes){
    fail("shared memory not admitted");
   bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
  }else fail("expected Wasm ArrayBuffer or typed array");
- // Avoid copying an attacker-sized ArrayBuffer before enforcing the host
- // byte limit. A rejected 1-GiB guest must not briefly allocate another GiB.
  if(bytes.byteLength>maxModuleBytes)fail("Wasm module exceeds host byte budget");
  return Uint8Array.from(bytes);
 }
@@ -24,12 +22,17 @@ function validInt(x,min,max,name){
  return x;
 }
 export function runVerifiedCoreGuestInWorker({
- wasmBytes,manifest,workerFactory,
+ wasmBytes,manifest,workerFactory,signal,
  timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32
 }={}){
  validInt(timeoutMs,1,30000,"timeoutMs");
  validInt(maxModuleBytes,8,1048576,"maxModuleBytes");
  validInt(maxMemoryPages,1,256,"maxMemoryPages");
+ if(signal!==undefined&&(!signal||typeof signal.aborted!=="boolean"||
+    typeof signal.addEventListener!=="function"||typeof signal.removeEventListener!=="function"))
+  fail("signal must be an AbortSignal-like cancellation source");
+ // An already aborted request must not create a Worker or allocate guest memory.
+ if(signal?.aborted)return Promise.reject(new Error("isolated Wasm worker aborted"));
  // Snapshot before any worker creation, event registration or async operation.
  const bytes=snapshotBytes(wasmBytes,maxModuleBytes);
  if(bytes.length>maxModuleBytes)fail("Wasm module exceeds host byte budget");
@@ -41,9 +44,14 @@ export function runVerifiedCoreGuestInWorker({
   return new Worker(new URL("./guest-worker.mjs",import.meta.url),{type:"module"});
  });
  return new Promise((resolve,reject)=>{
-  let worker,done=false,deadline;
+  let worker,done=false,deadline,abortRegistered=false;
+  const onAbort=()=>settle(new Error("isolated Wasm worker aborted"));
   const cleanup=()=>{
    if(deadline!==undefined)clearTimeout(deadline);
+   if(abortRegistered){
+    try{signal.removeEventListener("abort",onAbort);}catch{}
+    abortRegistered=false;
+   }
    if(worker){
     for(const [kind,cb] of [["message",onMessage],["error",onError],["messageerror",onError]]){
      try{worker.removeEventListener(kind,cb);}catch{}
@@ -80,8 +88,17 @@ export function runVerifiedCoreGuestInWorker({
    worker.addEventListener("message",onMessage);
    worker.addEventListener("error",onError);
    worker.addEventListener("messageerror",onError);
+   // Register cancellation before exposing guest input. A synchronous abort
+   // during workerFactory creation or subscription must fail closed too.
+   if(signal){
+    signal.addEventListener("abort",onAbort,{once:true});
+    abortRegistered=true;
+    if(signal.aborted)return settle(new Error("isolated Wasm worker aborted"));
+   }
+   if(done)return;
    deadline=setTimeout(()=>settle(new Error("isolated Wasm worker deadline exceeded")),timeoutMs);
    // Deliberately omit transfer list: guest module bytes have copy semantics.
+   if(done)return;
    worker.postMessage({kind:"oreslang-core-run-v1",wasmBytes:bytes,
     manifest:admittedManifest,maxModuleBytes,maxMemoryPages});
   }catch(error){settle(error)}
