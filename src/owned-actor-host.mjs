@@ -76,6 +76,12 @@ export function createOwnedActorWorker({
   Promise.resolve().then(()=>decodeMessage(snapped,data.bytes,{maxBytes})).then(
    reply=>{
     if(closed)return;
+    // A valid ORM1 envelope may still carry the wrong language-level type.
+    // This isolated reference Worker only permits Compute -> Result.
+    if(reply.variant!=="Result"){
+     cancelAll(new Error("unadmitted actor Worker reply variant"));
+     return;
+    }
     outstanding.delete(data.id);clearTimeout(entry.timer);entry.resolve(reply);
    },
    ()=>{
@@ -87,6 +93,9 @@ export function createOwnedActorWorker({
  const request=async(message)=>{
   if(closed)throw Error("actor closed");
   if(!ready)throw Error("actor not ready");
+  // Reference Worker supports Compute requests only. Fail before consuming an
+  // ID, allocating a deadline or sending an unadmitted variant to the Worker.
+  if(message?.variant!=="Compute")throw Error("unadmitted actor Worker request variant");
   if(outstanding.size>=maxPending)throw Error("actor Worker pending limit exceeded");
   if(nextId>Number.MAX_SAFE_INTEGER)throw Error("actor request ID exhausted");
   const id=nextId++;
