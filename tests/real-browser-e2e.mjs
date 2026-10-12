@@ -10,11 +10,19 @@ import {chromium,firefox} from "playwright";
 const root=resolve(fileURLToPath(new URL("..",import.meta.url)));
 const compiledWasm=process.env.ORESLANG_COMPILED_WASM;
 const compiledManifest=process.env.ORESLANG_COMPILED_MANIFEST;
+const variantWasm=process.env.ORESLANG_VARIANT_WASM;
+const variantManifest=process.env.ORESLANG_VARIANT_MANIFEST;
+const useVariant=Boolean(variantWasm)&&Boolean(variantManifest);
+if(Boolean(variantWasm)!==Boolean(variantManifest))
+ throw Error("real compiled source variant requires both Wasm bytes and manifest");
+if(useVariant&&!compiledWasm)
+ throw Error("source variant must be paired with compiled baseline");
 const requireCompiled=process.env.ORESLANG_REQUIRE_COMPILED==="1";
 if(Boolean(compiledWasm)!==Boolean(compiledManifest)||
    (requireCompiled&&(!compiledWasm||!compiledManifest||
      !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_COMPILER_SHA256||"")||
-     !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_SOURCE_SHA256||"")))){
+     !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_SOURCE_SHA256||"")||
+     !useVariant||!/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_VARIANT_SOURCE_SHA256||"")))){
  throw Error("real compiled Oreslang E2E requires binary, manifest and pinned source/compiler SHA-256");
 }
 
@@ -34,6 +42,14 @@ const server=createServer(async(request,response)=>{
   if(compiledManifest&&pathname==="/__compiled/guest.artifact.json"){
    response.writeHead(200,{"content-type":"application/json","cache-control":"no-store"});
    response.end(await readFile(compiledManifest));return;
+  }
+  if(useVariant&&pathname==="/__compiled/variant.wasm"){
+   response.writeHead(200,{"content-type":"application/wasm","cache-control":"no-store"});
+   response.end(await readFile(variantWasm));return;
+  }
+  if(useVariant&&pathname==="/__compiled/variant.artifact.json"){
+   response.writeHead(200,{"content-type":"application/json","cache-control":"no-store"});
+   response.end(await readFile(variantManifest));return;
   }
   const file=resolve(root,"."+pathname);
   if(!file.startsWith(root+sep)||extname(file)!==".mjs"){
@@ -63,7 +79,7 @@ try{
    // Playwright's evaluate() is NOT governed by setDefaultTimeout().
    // A broken/never-settling browser-side Promise must fail this test promptly.
    let watchdog;
-   const pending=page.evaluate(async({useCompiled,expectedCompilerSha,expectedSourceSha})=>{
+   const pending=page.evaluate(async({useCompiled,useVariant,expectedCompilerSha,expectedSourceSha,expectedVariantSourceSha})=>{
     const NativeWorker=globalThis.Worker;
     if(typeof NativeWorker!=="function")throw Error("native Web Worker unavailable");
     const lifecycle={created:0,terminated:0};
@@ -186,6 +202,34 @@ try{
        sourceSha256:pinnedManifest.producer.sourceSha256,
        compilerSha256:pinnedManifest.producer.compilerSha256};
      expectedWorkerCount+=2;
+     if(useVariant){
+      const [variantBytesResponse,variantManifestResponse]=await Promise.all([
+       fetch("/__compiled/variant.wasm",{cache:"no-store"}),
+       fetch("/__compiled/variant.artifact.json",{cache:"no-store"})
+      ]);
+      if(!variantBytesResponse.ok||!variantManifestResponse.ok)
+       throw Error("real source-mutation artifact not available");
+      const changed=new Uint8Array(await variantBytesResponse.arrayBuffer());
+      const changedManifest=await variantManifestResponse.json();
+      if(!WebAssembly.validate(changed))
+       throw Error("source mutation failed engine validation");
+      if(changedManifest.producer?.compilerSha256!==expectedCompilerSha||
+         changedManifest.producer?.sourceSha256!==expectedVariantSourceSha||
+         changedManifest.producer?.sourceSha256===expectedSourceSha||
+         changedManifest.wasmSha256===pinnedManifest.wasmSha256)
+       throw Error("source mutation did not produce distinct pinned compiler output");
+      if(changedManifest.wasmSha256!==await sha(changed))
+       throw Error("real changed-source compiled Wasm fails SHA-256 verification");
+      const changedValue=await run({wasmBytes:changed,manifest:changedManifest,timeoutMs:8000});
+      if(changedValue!==43n)throw Error("real source mutation should execute 43n");
+      await fail(run({wasmBytes:changed,
+        manifest:{...changedManifest,wasmSha256:"0".repeat(64)},
+        timeoutMs:8000}),/execution rejected/);
+      nativeSourceResult.changedResult=changedValue.toString();
+      nativeSourceResult.changedWasmSha256=changedManifest.wasmSha256;
+      nativeSourceResult.changedSourceSha256=changedManifest.producer.sourceSha256;
+      expectedWorkerCount+=2;
+     }
     }
 
     if(lifecycle.created!==expectedWorkerCount||lifecycle.terminated!==lifecycle.created)
@@ -197,9 +241,10 @@ try{
     }finally{
      globalThis.Worker=NativeWorker;
     }
-   },{useCompiled:Boolean(compiledWasm),
+   },{useCompiled:Boolean(compiledWasm),useVariant,
      expectedCompilerSha:process.env.ORESLANG_EXPECTED_COMPILER_SHA256||"",
-     expectedSourceSha:process.env.ORESLANG_EXPECTED_SOURCE_SHA256||""});
+     expectedSourceSha:process.env.ORESLANG_EXPECTED_SOURCE_SHA256||"",
+     expectedVariantSourceSha:process.env.ORESLANG_EXPECTED_VARIANT_SOURCE_SHA256||""});
    let result;
    try{
     result=await Promise.race([
@@ -210,12 +255,15 @@ try{
    }finally{clearTimeout(watchdog)}
    assert.deepEqual(result.result,"42");
    assert.equal(result.timeoutTerminated,true);
-   assert.equal(result.workerCreated,compiledWasm?16:14);
-   assert.equal(result.workerTerminated,compiledWasm?16:14);
+   assert.equal(result.workerCreated,compiledWasm?(useVariant?18:16):14);
+   assert.equal(result.workerTerminated,compiledWasm?(useVariant?18:16):14);
    if(requireCompiled){
     assert.equal(result.nativeSourceResult?.result,"42");
     assert.equal(result.nativeSourceResult.sourceSha256,process.env.ORESLANG_EXPECTED_SOURCE_SHA256);
     assert.equal(result.nativeSourceResult.compilerSha256,process.env.ORESLANG_EXPECTED_COMPILER_SHA256);
+    assert.equal(result.nativeSourceResult.changedResult,"43");
+    assert.equal(result.nativeSourceResult.changedSourceSha256,
+      process.env.ORESLANG_EXPECTED_VARIANT_SOURCE_SHA256);
    }
    process.stdout.write("PASS "+label+" "+JSON.stringify(result)+"\n");
   }catch(error){
