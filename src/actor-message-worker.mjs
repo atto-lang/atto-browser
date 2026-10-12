@@ -203,7 +203,7 @@ self.addEventListener("message",async event=>{
   if(stopPending&&!closed){
    closed=true;
    guestHandler=null;
-   self.postMessage({kind:"oreslang-v2-stopped"})
+   self.postMessage(tagged({kind:"oreslang-v2-stopped"}))
   }
  }
 });
