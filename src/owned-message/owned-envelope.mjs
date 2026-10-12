@@ -11,6 +11,19 @@ const SCHEMA_NODES=4096, SCHEMA_BYTES=65536;
 const magic=Uint8Array.of(79,82,77,49);
 const enc=new TextEncoder(),dec=new TextDecoder("utf-8",{fatal:true});
 const prim=new Set(["string","i64","bool","bytes"]);
+// Use typed-array intrinsic slots, never caller-controlled iterators, length,
+// buffer getters or subclass species when copying owned byte values.
+const typedArrayPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const intrinsicByteLength=Object.getOwnPropertyDescriptor(typedArrayPrototype,"byteLength").get;
+const intrinsicBuffer=Object.getOwnPropertyDescriptor(typedArrayPrototype,"buffer").get;
+const intrinsicSet=Uint8Array.prototype.set;
+function ownedByteLength(value){
+ if(!(value instanceof Uint8Array))fail("expected Uint8Array");
+ const buffer=intrinsicBuffer.call(value);
+ if(typeof SharedArrayBuffer!=="undefined"&&buffer instanceof SharedArrayBuffer)
+  fail("shared memory not admitted");
+ return intrinsicByteLength.call(value);
+}
 const plain=x=>x!==null&&typeof x==="object"&&[Object.prototype,null].includes(Object.getPrototypeOf(x));
 const fail=reason=>{throw new TypeError("Oreslang envelope: "+reason)};
 function shape(x,keys,name,required=[]){
@@ -114,9 +127,11 @@ function stringBytes(s){
 class Writer{
  constructor(limit){this.parts=[];this.size=0;this.limit=limit;this.visits=0;}
  visit(){if(++this.visits>ITEMS)fail("value node budget exceeded");}
- put(b){if(!(b instanceof Uint8Array)||b.length>this.limit-this.size)fail("byte budget exceeded");
-  if(typeof SharedArrayBuffer!=="undefined"&&b.buffer instanceof SharedArrayBuffer)fail("shared memory not admitted");
-  this.parts.push(Uint8Array.from(b));this.size+=b.length;}
+ put(b){const n=ownedByteLength(b);
+  if(n>this.limit-this.size)fail("byte budget exceeded");
+  const copy=new Uint8Array(n);
+  intrinsicSet.call(copy,b);
+  this.parts.push(copy);this.size+=n;}
  u8(n){this.put(Uint8Array.of(n));}
  u16(n){const b=new Uint8Array(2);new DataView(b.buffer).setUint16(0,n,true);this.put(b);}
  u32(n){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n,true);this.put(b);}
@@ -141,8 +156,8 @@ function encode(w,t,x,d=0){
  if(t==="bool"){if(typeof x!=="boolean")fail("expected bool");return w.u8(x?1:0);}
  if(t==="string"||t==="bytes"){
   const b=t==="string"?stringBytes(x):x;
-  if(!(b instanceof Uint8Array))fail("expected Uint8Array");
-  w.u32(b.length);return w.put(b);
+  const n=ownedByteLength(b);
+  w.u32(n);return w.put(b);
  }
  if(Object.hasOwn(t,"tuple")){
   if(!Array.isArray(x)||x.length!==t.tuple.length)fail("tuple arity mismatch");
