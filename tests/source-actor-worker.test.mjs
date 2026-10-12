@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
+import {createHash} from "node:crypto";
 import {Worker} from "node:worker_threads";
 import {encodeActorMessageV2} from "../src/messagepack-v2.mjs";
 import {createActorMessageTransport} from "../src/actor-transport.mjs";
@@ -61,6 +62,48 @@ test("tampered compiled actor binary is rejected before Ready or DATA receipt",{
   const g=await guest();
   g.wasmBytes=Uint8Array.from(g.wasmBytes);
   g.wasmBytes[g.wasmBytes.length-1]^=1;
+  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g}),
+   {kind:"oreslang-v2-panic"});
+ }finally{await w.terminate()}
+});
+
+
+test("forged manifest cannot hide actor Wasm memory growth above two pages",{
+ skip:!wasmPath||!manifestPath
+},async()=>{
+ const g=await guest();
+ const b=Uint8Array.from(g.wasmBytes);
+ let offset=8,changed=false;
+ const integer=()=>{
+  let value=0;
+  for(let n=0;n<5;n++){
+   if(offset>=b.length)throw Error("truncated test module");
+   const x=b[offset++];value+=(x&127)*2**(7*n);
+   if(!(x&128))return value;
+  }
+  throw Error("oversized test LEB128");
+ };
+ while(offset<b.length){
+  const id=b[offset++],size=integer(),end=offset+size;
+  if(id===5){
+   assert.equal(integer(),1,"single memory expected");
+   assert.equal(integer(),1,"explicit maximum expected");
+   assert.equal(integer(),2,"two-page minimum expected");
+   const maxAt=offset;
+   assert.equal(integer(),2,"two-page maximum expected");
+   assert.equal(offset,end);
+   b[maxAt]=3;changed=true;break;
+  }
+  offset=end;
+ }
+ assert.ok(changed,"compiled guest actually declares memory");
+ assert.ok(WebAssembly.validate(b),"forged memory cap remains a valid Wasm binary");
+ g.wasmBytes=b;
+ g.manifest.wasmSha256=createHash("sha256").update(b).digest("hex");
+ // A matching manifest digest is insufficient when the binary violates
+ // the actor's real memory budget.
+ const w=new Worker(workerUrl,{type:"module"});
+ try{
   assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g}),
    {kind:"oreslang-v2-panic"});
  }finally{await w.terminate()}
