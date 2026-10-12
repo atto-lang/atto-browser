@@ -47,7 +47,11 @@ try{
     const errors=[];
     page.on("pageerror",e=>errors.push(String(e)));
     await page.goto(origin,{waitUntil:"load"});
-    const outcome=await page.evaluate(async()=>{
+    // Node's test timeout does not interrupt a pending Playwright page.evaluate().
+    // A separate host deadline must reject even if guest Worker/browser JS hangs.
+    let evaluationWatchdog;
+    const outcome=await Promise.race([
+      page.evaluate(async()=>{
       const {createOwnedActorWorker}=await import("/src/owned-actor-host.mjs");
       const schema={schemaVersion:1,ownership:"copy",variants:[
        {id:1,name:"Compute",fields:[{name:"text",type:"string"},{name:"n",type:"i64"}]},
@@ -79,7 +83,11 @@ try{
       let closeRejected=false;
       try{await pending}catch(e){closeRejected=/actor closed/.test(String(e))}
       return {roundTrips,badVariantRejected,mutatedSnapshot,closeRejected,pendingAfterClose:closeActor.pending};
-    });
+      }),
+      new Promise((_,reject)=>{
+        evaluationWatchdog=setTimeout(()=>reject(new Error("browser Worker evaluation exceeded independent 90-second host deadline")),90000);
+      })
+    ]).finally(()=>clearTimeout(evaluationWatchdog));
     assert.deepEqual(outcome,{roundTrips:12,badVariantRejected:true,mutatedSnapshot:true,closeRejected:true,pendingAfterClose:0});
     assert.deepEqual(errors,[],"uncaught page errors: "+errors.join("; "));
    }finally{await browser.close()}
