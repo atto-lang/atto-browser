@@ -60,3 +60,18 @@ of compiler-generated Oreslang actor handlers, Java/LLVM source conformance,
 arbitrary guest safety, or a trustworthy sandbox. The browser implementation
 still requires supervision, cancellation and actual guest-actor lowering
 end-to-end before production release.
+
+## Canonical actor Worker INIT and terminal lifecycle
+
+The experimental actor DATA transport uses the canonical `messagepack-v2.mjs`
+`validateActorMessageV2Contract` grammar on **both** sides of the INIT
+handshake. The host validates before allocating a Worker; the isolated Worker
+validates again before emitting READY. Printable ASCII schema IDs are limited
+to 256 bytes and shape descriptors to 4096 bytes, with bounded depth and
+canonical shape syntax. No independent copy of the grammar is maintained.
+
+Worker lifecycle states are absorbing: once terminal panic or drain completes,
+future INIT/DATA cannot resurrect READY or produce receipts. A terminal DATA
+buffer is scrubbed when it is safe to do so. These transport invariants do **not**
+prove compiler-level single-flight actor execution, Java/LLVM parity, or
+actor-handler suspension/cancellation ownership correctness.
