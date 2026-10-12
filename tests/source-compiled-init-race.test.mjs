@@ -31,7 +31,7 @@ async function endpoint(label,block,opts={}){
  const realWasm=globalThis.WebAssembly;
  const received=[];
  let dispatch;
- const spy={init:0,compile:0,teardown:0};
+ const spy={init:0,compile:0,teardown:0,messages:0};
  try{
   Object.defineProperty(globalThis,"self",{configurable:true,value:{
    addEventListener(kind,callback){if(kind==="message")dispatch=callback},
@@ -43,6 +43,9 @@ async function endpoint(label,block,opts={}){
    return {exports:{...real.exports,
     oreslang_wasm_actor_init(...args){
      spy.init++;return real.exports.oreslang_wasm_actor_init(...args)
+    },
+    oreslang_wasm_actor_on_message(...args){
+     spy.messages++;return real.exports.oreslang_wasm_actor_on_message(...args)
     },
     oreslang_wasm_actor_teardown(...args){
      spy.teardown++;
@@ -81,6 +84,7 @@ test("source-compiled actor executes real import-free guest ABI and drains",asyn
   await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
   assert.deepEqual(received.at(-1),{kind:"oreslang-v2-stopped"});
   assert.equal(spy.init,1);
+  assert.equal(spy.messages,1,"one source DATA invokes the guest once");
   assert.equal(spy.teardown,1,"successful drain destroys guest once");
  });
 });
@@ -150,4 +154,66 @@ test("malformed DATA terminal panic performs exactly one trapping teardown",asyn
   await dispatch({data:{kind:"oreslang-v2-data",id:2,frame:Uint8Array.of(9)}});
   assert.equal(spy.teardown,1);
  },{trapTeardown:true});
+});
+
+test("terminal panic while DATA SHA is suspended forbids later guest execution",async()=>{
+ const sourceFrame=await encodeActorMessageV2({schemaId,descriptor,value:11n});
+ let calls=0,entered,release;
+ const suspended=new Promise(resolve=>entered=resolve);
+ await endpoint("data-sha-panic",async({dispatch,init,received,spy})=>{
+  await init();
+  const original=Uint8Array.from(sourceFrame);
+  const pending=dispatch({data:{kind:"oreslang-v2-data",id:1,frame:original}});
+  await suspended;
+  // A concurrent DATA ticket is an actor protocol violation, and must
+  // terminally panic before either suspended message invokes guest code.
+  const conflicting=Uint8Array.from(sourceFrame);
+  await dispatch({data:{kind:"oreslang-v2-data",id:2,frame:conflicting}});
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}]);
+  assert.equal(spy.messages,0);
+  assert.equal(spy.teardown,1,"panic releases guest exactly once");
+  assert.ok(conflicting.every(byte=>byte===0),"conflicting DATA clone scrubbed");
+  release();
+  await pending;
+  assert.equal(spy.messages,0,"late decoded message must not reach guest");
+  assert.ok(original.every(byte=>byte===0),"cancelled DATA clone scrubbed");
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}]);
+ },{digest:(algorithm,bytes)=>{
+  if(++calls===1)return webcrypto.subtle.digest(algorithm,bytes);
+  return new Promise((resolve,reject)=>{
+   release=()=>webcrypto.subtle.digest(algorithm,bytes).then(resolve,reject);
+   entered();
+  });
+ }});
+});
+
+test("drain during DATA SHA awaits one guest turn then tears down exactly once",async()=>{
+ const sourceFrame=await encodeActorMessageV2({schemaId,descriptor,value:12n});
+ let calls=0,entered,release;
+ const suspended=new Promise(resolve=>entered=resolve);
+ await endpoint("data-sha-drain",async({dispatch,init,received,spy})=>{
+  await init();
+  const original=Uint8Array.from(sourceFrame);
+  const pending=dispatch({data:{kind:"oreslang-v2-data",id:1,frame:original}});
+  await suspended;
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"}],
+   "drain may not report STOPPED before the in-flight turn");
+  release();
+  await pending;
+  assert.deepEqual(received,[
+   {kind:"oreslang-v2-ready"},
+   {kind:"oreslang-v2-receipt",id:1,ok:true,result:12n},
+   {kind:"oreslang-v2-stopped"}
+  ]);
+  assert.equal(spy.messages,1,"in-flight guest executed once");
+  assert.equal(spy.teardown,1,"graceful CONTROL drains one guest lifetime");
+  assert.ok(original.every(byte=>byte===0),"drained DATA frame scrubbed");
+ },{digest:(algorithm,bytes)=>{
+  if(++calls===1)return webcrypto.subtle.digest(algorithm,bytes);
+  return new Promise((resolve,reject)=>{
+   release=()=>webcrypto.subtle.digest(algorithm,bytes).then(resolve,reject);
+   entered();
+  });
+ }});
 });
