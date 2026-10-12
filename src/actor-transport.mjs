@@ -5,9 +5,17 @@
  */
 import {encodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
+// This process-local authority is deliberately not a cross-tab or cross-host
+// lock. A guest actorKey cannot be reused until its carrier terminates.
+const activeIncarnations=new Map();
+function newIncarnation(){
+ const bytes=new Uint8Array(16);
+ crypto.getRandomValues(bytes);
+ return Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
+}
 export function createActorMessageTransport({
  schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic,
- guest,maxFrameBytes=1048576,maxReservedBytes=4194304
+ guest,actorKey,maxFrameBytes=1048576,maxReservedBytes=4194304
 }={}){
  // Validate bounded INIT metadata and full descriptor grammar before
  // worker creation, guest-copy allocation, or any user-visible admission.
@@ -26,6 +34,12 @@ export function createActorMessageTransport({
  if(!Number.isSafeInteger(maxFrameBytes)||maxFrameBytes<64||maxFrameBytes>1048576)fail("invalid frame byte budget");
  if(!Number.isSafeInteger(maxReservedBytes)||maxReservedBytes<maxFrameBytes||maxReservedBytes>67108864)
   fail("invalid total reserved byte budget");
+ if(guest!==undefined &&
+    (typeof actorKey!=="string"||actorKey.length<1||actorKey.length>128||
+     !/^[a-zA-Z0-9_.:/-]+$/.test(actorKey)))
+  fail("compiled guest requires stable bounded actorKey");
+ if(guest===undefined&&actorKey!==undefined)
+  fail("actorKey is only valid for compiled actor guests");
  // Clone before admission; the caller retains ownership of its original Wasm
  // bytes. Never let a SharedArrayBuffer reach the execution Worker.
  let guestBytes=null;
@@ -44,17 +58,44 @@ export function createActorMessageTransport({
    fail("actor guest Wasm byte budget");
   guestBytes=Uint8Array.from(view);
  }
+ // Generation-fenced local actor lease. No second Worker with the same
+ // supervisor-provided actor identity can be spawned while retirement is
+ // unconfirmed, including after stop() has already been requested.
+ const incarnation=guest===undefined?null:newIncarnation();
+ if(actorKey!==undefined){
+  if(activeIncarnations.has(actorKey)){
+   guestBytes?.fill(0);
+   fail("actor incarnation still active or termination unconfirmed");
+  }
+  activeIncarnations.set(actorKey,incarnation);
+ }
  const create=workerFactory||(()=>{
   if(typeof Worker!=="function")fail("dedicated Web Worker unavailable");
   return new Worker(new URL("./actor-message-worker.mjs",import.meta.url),{type:"module"});
  });
  let worker;
- try{worker=create()}catch(error){guestBytes?.fill(0);throw error}
+ try{worker=create()}catch(error){
+  guestBytes?.fill(0);
+  if(actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
+   activeIncarnations.delete(actorKey);
+  throw error
+ }
  if(!worker||["postMessage","addEventListener","removeEventListener","terminate"].some(x=>typeof worker[x]!=="function")){
   // A broken factory may already have allocated a live OS Worker before
   // returning an incomplete adapter. Revoke it rather than leaking a carrier.
   try{const termination=worker?.terminate?.();termination?.catch?.(()=>{})}catch{}
   guestBytes?.fill(0);
+  // Keep the identity fenced if termination cannot be confirmed.
+  if(actorKey!==undefined){
+   try{
+    const termination=worker?.terminate?.();
+    if(termination&&typeof termination.then==="function")
+     termination.then(()=>{if(activeIncarnations.get(actorKey)===incarnation)
+      activeIncarnations.delete(actorKey)}).catch(()=>{});
+    else if(activeIncarnations.get(actorKey)===incarnation)
+     activeIncarnations.delete(actorKey);
+   }catch{}
+  }
   fail("trusted dedicated Worker required");
  }
  let pending=0,ready=false,active=null,sealed=false,stopping=false,finished=false,seq=0,deadline;
@@ -71,7 +112,15 @@ export function createActorMessageTransport({
   clear();
   for(const [kind,cb] of [["message",onMessage],["error",onError],["messageerror",onError],["exit",onExit]])
    try{worker.removeEventListener(kind,cb)}catch{}
-  try{const x=worker.terminate();if(x&&typeof x.catch==="function")x.catch(()=>{})}catch{}
+  let termination;
+  try{termination=worker.terminate()}
+  catch(error){termination=Promise.reject(error)}
+  // Do not release the actor identity before the OS/Worker carrier confirms
+  // termination. If termination fails, fail closed: retain the lease.
+  return Promise.resolve(termination).then(()=>{
+   if(actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
+    activeIncarnations.delete(actorKey);
+  });
  };
  const complete=(error,notifySupervisor=true)=>{
   if(finished)return;
@@ -88,9 +137,16 @@ export function createActorMessageTransport({
   // receipt; cancellation/panic must scrub it, too.
   active?.frame?.fill(0);
   active=null;pending=0;
-  cleanup();
-  if(error){if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}doneReject(error)}
-  else doneResolve();
+  cleanup().then(()=>{
+   if(error){
+    if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}
+    doneReject(error);
+   }else doneResolve();
+  },terminationError=>{
+   const failure=Error("actor carrier termination unconfirmed", {cause:terminationError});
+   if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:failure.message})}catch{}
+   doneReject(failure);
+  });
  };
  const fatal=error=>complete(error instanceof Error?error:Error("isolated actor Worker failed"));
  const onError=()=>fatal(Error("isolated actor Worker failed"));
@@ -115,13 +171,15 @@ export function createActorMessageTransport({
      const item=queue.shift();active=item;
      item.dispatched=true;
      try{
-      worker.postMessage({kind:"oreslang-v2-data",id:item.id,frame:item.frame});
+      worker.postMessage({kind:"oreslang-v2-data",id:item.id,frame:item.frame,
+       ...(incarnation===null?{}:{incarnation})});
       if(active===item&&!finished)arm();
      }catch{fatal(Error("actor DATA transport failure"))}
     }else if(sealed&&pending===0&&!stopping){
      stopping=true;
      try{
-      worker.postMessage({kind:"oreslang-v2-control",action:"drain"});
+      worker.postMessage({kind:"oreslang-v2-control",action:"drain",
+       ...(incarnation===null?{}:{incarnation})});
       if(!finished)arm();
      }catch{fatal(Error("actor CONTROL transport failure"))}
     }
@@ -132,6 +190,8 @@ export function createActorMessageTransport({
   if(finished)return;
   const m=event?.data;
   if(!m||typeof m!=="object")return fatal(Error("invalid actor worker message"));
+  if(incarnation!==null&&m.incarnation!==incarnation)
+   return fatal(Error("stale or forged actor incarnation response"));
   if(m.kind==="oreslang-v2-panic")
    return fatal(Error("isolated actor Worker reported panic"));
   if(m.kind==="oreslang-v2-ready"&&!ready&&!stopping){ready=true;clear();pump();return}
@@ -153,7 +213,8 @@ export function createActorMessageTransport({
   try{worker.addEventListener("exit",onExit)}catch{}
   try{
    worker.postMessage({kind:"oreslang-v2-init",schemaId,descriptor,
-    ...(guestBytes===null?{}:{guest:{wasmBytes:guestBytes,manifest:guest.manifest}})});
+    ...(guestBytes===null?{}:{incarnation,
+     guest:{wasmBytes:guestBytes,manifest:guest.manifest}})});
   }finally{guestBytes?.fill(0)}
   if(!ready&&!finished)arm();
  }catch{
