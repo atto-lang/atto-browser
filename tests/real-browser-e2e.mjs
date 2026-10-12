@@ -8,6 +8,16 @@ import {fileURLToPath} from "node:url";
 import {chromium,firefox} from "playwright";
 
 const root=resolve(fileURLToPath(new URL("..",import.meta.url)));
+const compiledWasm=process.env.ORESLANG_COMPILED_WASM;
+const compiledManifest=process.env.ORESLANG_COMPILED_MANIFEST;
+const requireCompiled=process.env.ORESLANG_REQUIRE_COMPILED==="1";
+if(Boolean(compiledWasm)!==Boolean(compiledManifest)||
+   (requireCompiled&&(!compiledWasm||!compiledManifest||
+     !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_COMPILER_SHA256||"")||
+     !/^[a-f0-9]{64}$/.test(process.env.ORESLANG_EXPECTED_SOURCE_SHA256||""))){
+ throw Error("real compiled Oreslang E2E requires binary, manifest and pinned source/compiler SHA-256");
+}
+
 const server=createServer(async(request,response)=>{
  try {
   const pathname=decodeURIComponent(new URL(request.url,"http://localhost").pathname);
@@ -16,6 +26,14 @@ const server=createServer(async(request,response)=>{
      "cache-control":"no-store"});
    response.end("<!doctype html><html><head><title>Oreslang real Worker E2E</title></head><body></body></html>");
    return;
+  }
+  if(compiledWasm&&pathname==="/__compiled/guest.wasm"){
+   response.writeHead(200,{"content-type":"application/wasm","cache-control":"no-store"});
+   response.end(await readFile(compiledWasm));return;
+  }
+  if(compiledManifest&&pathname==="/__compiled/guest.artifact.json"){
+   response.writeHead(200,{"content-type":"application/json","cache-control":"no-store"});
+   response.end(await readFile(compiledManifest));return;
   }
   const file=resolve(root,"."+pathname);
   if(!file.startsWith(root+sep)||extname(file)!==".mjs"){
@@ -45,7 +63,7 @@ try{
    // Playwright's evaluate() is NOT governed by setDefaultTimeout().
    // A broken/never-settling browser-side Promise must fail this test promptly.
    let watchdog;
-   const pending=page.evaluate(async()=>{
+   const pending=page.evaluate(async({useCompiled,expectedCompilerSha,expectedSourceSha})=>{
     const NativeWorker=globalThis.Worker;
     if(typeof NativeWorker!=="function")throw Error("native Web Worker unavailable");
     const lifecycle={created:0,terminated:0};
@@ -142,16 +160,46 @@ try{
     // Recovery after termination proves subsequent fresh Worker still executes.
     const recovered=await run({wasmBytes:good,manifest:metadata,timeoutMs:8000});
     if(recovered!==42n)throw Error("post-timeout Worker recovery failed");
-    if(lifecycle.created!==14||lifecycle.terminated!==lifecycle.created)
+    let nativeSourceResult=null,expectedWorkerCount=14;
+    if(useCompiled){
+     const [binaryResponse,manifestResponse]=await Promise.all([
+      fetch("/__compiled/guest.wasm",{cache:"no-store"}),
+      fetch("/__compiled/guest.artifact.json",{cache:"no-store"})
+     ]);
+     if(!binaryResponse.ok||!manifestResponse.ok)
+      throw Error("real compiled Oreslang artifact not available");
+     const compiled=new Uint8Array(await binaryResponse.arrayBuffer());
+     const pinnedManifest=await manifestResponse.json();
+     if(!WebAssembly.validate(compiled))
+      throw Error("real compiled Oreslang Wasm fails engine validation");
+     if(pinnedManifest.producer?.compilerSha256!==expectedCompilerSha||
+        pinnedManifest.producer?.sourceSha256!==expectedSourceSha)
+      throw Error("real LLVM/compiler source SHA-256 does not match pinned provenance");
+     if(pinnedManifest.wasmSha256!==await sha(compiled))
+      throw Error("real Oreslang compiled Wasm does not match manifest SHA-256");
+     const nativeValue=await run({wasmBytes:compiled,manifest:pinnedManifest,timeoutMs:8000});
+     if(nativeValue!==42n)throw Error("real compiled Oreslang result not 42n");
+     await fail(run({wasmBytes:compiled,
+       manifest:{...pinnedManifest,wasmSha256:"0".repeat(64)},
+       timeoutMs:8000}),/execution rejected/);
+     nativeSourceResult={result:nativeValue.toString(),wasmSha256:pinnedManifest.wasmSha256,
+       sourceSha256:pinnedManifest.producer.sourceSha256,
+       compilerSha256:pinnedManifest.producer.compilerSha256};
+     expectedWorkerCount+=2;
+    }
+
+    if(lifecycle.created!==expectedWorkerCount||lifecycle.terminated!==lifecycle.created)
      throw Error("real Worker lifecycle mismatch: "+JSON.stringify(lifecycle));
     return {workerKind:"real browser module Worker",result:value.toString(),
       parallelRuns:series.length,rejectCases:5,timeoutTerminated:true,
       workerCreated:lifecycle.created,workerTerminated:lifecycle.terminated,
-      mainThreadTicks:ticks,recovered:recovered.toString()};
+      mainThreadTicks:ticks,recovered:recovered.toString(),nativeSourceResult};
     }finally{
      globalThis.Worker=NativeWorker;
     }
-   });
+   },{useCompiled:Boolean(compiledWasm),
+     expectedCompilerSha:process.env.ORESLANG_EXPECTED_COMPILER_SHA256||"",
+     expectedSourceSha:process.env.ORESLANG_EXPECTED_SOURCE_SHA256||""});
    let result;
    try{
     result=await Promise.race([
@@ -162,8 +210,13 @@ try{
    }finally{clearTimeout(watchdog)}
    assert.deepEqual(result.result,"42");
    assert.equal(result.timeoutTerminated,true);
-   assert.equal(result.workerCreated,14);
-   assert.equal(result.workerTerminated,14);
+   assert.equal(result.workerCreated,compiledWasm?16:14);
+   assert.equal(result.workerTerminated,compiledWasm?16:14);
+   if(requireCompiled){
+    assert.equal(result.nativeSourceResult?.result,"42");
+    assert.equal(result.nativeSourceResult.sourceSha256,process.env.ORESLANG_EXPECTED_SOURCE_SHA256);
+    assert.equal(result.nativeSourceResult.compilerSha256,process.env.ORESLANG_EXPECTED_COMPILER_SHA256);
+   }
    process.stdout.write("PASS "+label+" "+JSON.stringify(result)+"\n");
   }catch(error){
    failCount++;
