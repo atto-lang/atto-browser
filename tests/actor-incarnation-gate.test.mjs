@@ -69,3 +69,54 @@ test("compiled actor identity is mandatory and invalid key rejected before Worke
  }
  assert.equal(created,0);
 });
+
+function voidTerminationAdapter({ackDrain=true}={}){
+ let receive,terminations=0;
+ const worker={
+  addEventListener(kind,fn){if(kind==="message")receive=fn},
+  removeEventListener(){},
+  postMessage(data){
+   if(data.kind==="oreslang-v2-init")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-ready",incarnation:data.incarnation}}));
+   else if(data.kind==="oreslang-v2-control"&&ackDrain)
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-stopped",incarnation:data.incarnation}}));
+  },
+  terminate(){terminations++}
+ };
+ return {worker,get terminations(){return terminations}};
+}
+
+test("void Worker.terminate does not release a forcibly cancelled actor identity",async()=>{
+ const key="counter/void-terminate-no-exit-proof";
+ const adapter=voidTerminationAdapter({ackDrain:false});
+ const actor=createActorMessageTransport({...spec,guest:guest(),actorKey:key,
+  workerFactory:()=>adapter.worker});
+ await tick();
+ await assert.rejects(actor.stop(),/carrier termination unconfirmed/);
+ assert.equal(adapter.terminations,1);
+ assert.throws(()=>createActorMessageTransport({...spec,guest:guest(),actorKey:key,
+  workerFactory:()=>{throw Error("replacement carrier must not be created")}}),
+  /incarnation still active or termination unconfirmed/);
+});
+
+test("validated STOPPED acknowledges quiescence for void-terminating browser Worker",async()=>{
+ const key="counter/void-worker-clean-drain";
+ for(let i=0;i<2;i++){
+  const adapter=voidTerminationAdapter();
+  const actor=createActorMessageTransport({...spec,guest:guest(),actorKey:key,
+   workerFactory:()=>adapter.worker});
+  await tick();
+  await actor.drain();
+  assert.equal(adapter.terminations,1);
+ }
+});
+
+test("invalid void-terminating adapter retains identity fence after rejection",()=>{
+ const key="counter/invalid-void-termination";
+ assert.throws(()=>createActorMessageTransport({...spec,guest:guest(),actorKey:key,
+  workerFactory:()=>({terminate(){},postMessage(){}})}),
+  /trusted dedicated Worker required/);
+ assert.throws(()=>createActorMessageTransport({...spec,guest:guest(),actorKey:key,
+  workerFactory:()=>{throw Error("should not allocate")}}),
+  /incarnation still active or termination unconfirmed/);
+});
