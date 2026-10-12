@@ -16,6 +16,11 @@ const prim=new Set(["string","i64","bool","bytes"]);
 const typedArrayPrototype=Object.getPrototypeOf(Uint8Array.prototype);
 const intrinsicByteLength=Object.getOwnPropertyDescriptor(typedArrayPrototype,"byteLength").get;
 const intrinsicBuffer=Object.getOwnPropertyDescriptor(typedArrayPrototype,"buffer").get;
+const intrinsicByteOffset=Object.getOwnPropertyDescriptor(typedArrayPrototype,"byteOffset").get;
+const arrayBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+const dataViewLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
+const dataViewBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dataViewOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
 const intrinsicSet=Uint8Array.prototype.set;
 function ownedByteLength(value){
  if(!(value instanceof Uint8Array))fail("expected Uint8Array");
@@ -204,18 +209,23 @@ function decode(r,t,d=0){
  return Object.freeze({variant:v.name,value:v.payload===null?null:decode(r,v.payload,d+1)});
 }
 function snapshot(input,maxBytes){
- // Enforce byte limits BEFORE copying. An attacker-controlled oversized
- // response must not force a large host allocation prior to rejection.
+ // Bound BEFORE copying and use intrinsic buffer/view slots. An untrusted
+ // view may shadow .buffer, .byteLength, .byteOffset or [Symbol.iterator].
+ let buffer,offset=0,length;
  if(input instanceof ArrayBuffer){
-  if(input.byteLength<HEADER||input.byteLength>maxBytes)fail("invalid message size");
-  return Uint8Array.from(new Uint8Array(input));
- }
- if(ArrayBuffer.isView(input)){
-  if(typeof SharedArrayBuffer!=="undefined"&&input.buffer instanceof SharedArrayBuffer)fail("shared memory not admitted");
-  if(input.byteLength<HEADER||input.byteLength>maxBytes)fail("invalid message size");
-  return Uint8Array.from(new Uint8Array(input.buffer,input.byteOffset,input.byteLength));
- }
- fail("expected message bytes");
+  buffer=input;length=arrayBufferLength.call(input);
+ }else if(ArrayBuffer.isView(input)){
+  const isDataView=input instanceof DataView;
+  buffer=(isDataView?dataViewBuffer:intrinsicBuffer).call(input);
+  offset=(isDataView?dataViewOffset:intrinsicByteOffset).call(input);
+  length=(isDataView?dataViewLength:intrinsicByteLength).call(input);
+  if(typeof SharedArrayBuffer!=="undefined"&&buffer instanceof SharedArrayBuffer)
+   fail("shared memory not admitted");
+ }else fail("expected message bytes");
+ if(length<HEADER||length>maxBytes)fail("invalid message size");
+ const copy=new Uint8Array(length);
+ intrinsicSet.call(copy,new Uint8Array(buffer,offset,length));
+ return copy;
 }
 function budget(n){if(!Number.isSafeInteger(n)||n<HEADER||n>LIMIT)fail("invalid maxBytes");}
 export async function encodeMessage(schema,message,{maxBytes=LIMIT}={}){
