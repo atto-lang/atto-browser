@@ -5,7 +5,7 @@
  */
 const signedI64=/^(?:0|-?[1-9][0-9]*)$/;
 const fail=x=>{throw new TypeError("Oreslang Worker: "+x)};
-function snapshotBytes(input){
+function snapshotBytes(input,maxModuleBytes){
  let bytes;
  if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
  else if(ArrayBuffer.isView(input)) {
@@ -13,6 +13,9 @@ function snapshotBytes(input){
    fail("shared memory not admitted");
   bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
  }else fail("expected Wasm ArrayBuffer or typed array");
+ // Avoid copying an attacker-sized ArrayBuffer before enforcing the host
+ // byte limit. A rejected 1-GiB guest must not briefly allocate another GiB.
+ if(bytes.byteLength>maxModuleBytes)fail("Wasm module exceeds host byte budget");
  return Uint8Array.from(bytes);
 }
 function validInt(x,min,max,name){
@@ -27,7 +30,7 @@ export function runVerifiedCoreGuestInWorker({
  validInt(maxModuleBytes,8,1048576,"maxModuleBytes");
  validInt(maxMemoryPages,1,256,"maxMemoryPages");
  // Snapshot before any worker creation, event registration or async operation.
- const bytes=snapshotBytes(wasmBytes);
+ const bytes=snapshotBytes(wasmBytes,maxModuleBytes);
  if(bytes.length>maxModuleBytes)fail("Wasm module exceeds host byte budget");
  let admittedManifest;
  try{admittedManifest=JSON.parse(JSON.stringify(manifest));}
