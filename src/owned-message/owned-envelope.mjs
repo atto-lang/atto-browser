@@ -146,8 +146,10 @@ function encode(w,t,x,d=0){
  }
  if(Object.hasOwn(t,"tuple")){
   if(!Array.isArray(x)||x.length!==t.tuple.length)fail("tuple arity mismatch");
+  // Do not execute getters, inherited slots or shadowed array methods while
+  // constructing an owned payload. Check all elements before writing bytes.
+  denseSchemaArray(x,"tuple element",t.tuple.length,t.tuple.length);
   for(let i=0;i<t.tuple.length;i++){
-   if(!Object.hasOwn(x,i))fail("sparse tuple element");
    encode(w,t.tuple[i],x[i],d+1);
   }
   return;
@@ -155,12 +157,10 @@ function encode(w,t,x,d=0){
  if(Object.hasOwn(t,"array")||Object.hasOwn(t,"list")){
   const fixed=Object.hasOwn(t,"array"),spec=fixed?t.array:t.list;
   if(!Array.isArray(x)||(fixed?x.length!==spec.length:x.length>spec.maxLength))fail("array/list length");
+  denseSchemaArray(x,"array/list element",0,ITEMS);
   if(!fixed)w.u32(x.length);
-  // Array.forEach skips sparse holes. With a zero-byte element type this
-  // would silently encode fewer values than the declared length, defeating
-  // node budgets and canonical typed-message round trips.
+  // Dense own-data slots prevent getter side effects or inherited values.
   for(let i=0;i<x.length;i++){
-   if(!Object.hasOwn(x,i))fail("sparse array/list element");
    encode(w,spec.element,x[i],d+1);
   }
   return;
@@ -188,10 +188,16 @@ function decode(r,t,d=0){
  const variantId=r.u16();const v=t.enum.find(a=>a.id===variantId);if(!v)fail("unknown enum ID");
  return Object.freeze({variant:v.name,value:v.payload===null?null:decode(r,v.payload,d+1)});
 }
-function snapshot(input){
- if(input instanceof ArrayBuffer)return Uint8Array.from(new Uint8Array(input));
+function snapshot(input,maxBytes){
+ // Enforce byte limits BEFORE copying. An attacker-controlled oversized
+ // response must not force a large host allocation prior to rejection.
+ if(input instanceof ArrayBuffer){
+  if(input.byteLength<HEADER||input.byteLength>maxBytes)fail("invalid message size");
+  return Uint8Array.from(new Uint8Array(input));
+ }
  if(ArrayBuffer.isView(input)){
   if(typeof SharedArrayBuffer!=="undefined"&&input.buffer instanceof SharedArrayBuffer)fail("shared memory not admitted");
+  if(input.byteLength<HEADER||input.byteLength>maxBytes)fail("invalid message size");
   return Uint8Array.from(new Uint8Array(input.buffer,input.byteOffset,input.byteLength));
  }
  fail("expected message bytes");
@@ -212,8 +218,7 @@ export async function encodeMessage(schema,message,{maxBytes=LIMIT}={}){
  dv.setUint32(8,payload.length,true);result.set(hash,12);result.set(payload,HEADER);return result;
 }
 export async function decodeMessage(schema,input,{maxBytes=LIMIT}={}){
- budget(maxBytes);const c=contract(schema),bytes=snapshot(input);
- if(bytes.length<HEADER||bytes.length>maxBytes)fail("invalid message size");
+ budget(maxBytes);const c=contract(schema),bytes=snapshot(input,maxBytes);
  const r=new Reader(bytes);for(const m of magic)if(r.u8()!==m)fail("bad magic");
  if(r.u8()!==1||r.u8()!==0)fail("unknown version/flags");
  const variantId=r.u16(),n=r.u32(),received=r.take(32);
