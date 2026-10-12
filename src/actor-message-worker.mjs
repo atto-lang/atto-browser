@@ -4,6 +4,7 @@
  * Does not execute source-level Oreslang actor handlers.
  */
 import {decodeActorMessageV2} from "./messagepack-v2.mjs";
+import {validateActorWorkerContract} from "./actor-contract.mjs";
 let ready=false,closed=false,handling=false,stopPending=false,contract,lastTicket=0;
 // Worker postMessage() snapshots into private destination memory. Never
 // mutate caller-owned SharedArrayBuffer data when rejecting a malformed frame.
@@ -23,6 +24,10 @@ self.addEventListener("message",async event=>{
  if(!ready){
   if(data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
     typeof data.descriptor!=="string"){scrubOwnedFrame(data.frame);return panic()}
+  // Directly posted INIT messages must meet the exact same canonical
+  // contract as host-created Workers. Fail before retaining metadata.
+  try{validateActorWorkerContract(data.schemaId,data.descriptor)}
+  catch{scrubOwnedFrame(data.frame);return panic()}
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
   ready=true;
   self.postMessage({kind:"oreslang-v2-ready"});
