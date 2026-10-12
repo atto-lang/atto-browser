@@ -3,7 +3,7 @@
  * emits internal DATA receipts, honors a separate CONTROL drain channel.
  * Does not execute source-level Oreslang actor handlers.
  */
-import {decodeActorMessageV2} from "./messagepack-v2.mjs";
+import {decodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 let ready=false,closed=false,handling=false,stopPending=false,contract,lastTicket=0;
 // Worker postMessage() snapshots into private destination memory. Never
 // mutate caller-owned SharedArrayBuffer data when rejecting a malformed frame.
@@ -31,6 +31,10 @@ self.addEventListener("message",async event=>{
     !/^[\x21-\x7e]{1,4096}$/.test(data.descriptor)){
    scrubOwnedFrame(data.frame);return panic();
   }
+  // A syntactically invalid but printable descriptor must never receive a
+  // READY acknowledgement before its first DATA. Parser complexity is bounded.
+  try{validateActorMessageV2Contract(data)}
+  catch{scrubOwnedFrame(data.frame);return panic()}
   contract={schemaId:data.schemaId,descriptor:data.descriptor};
   ready=true;
   self.postMessage({kind:"oreslang-v2-ready"});
