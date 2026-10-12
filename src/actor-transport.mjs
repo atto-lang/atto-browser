@@ -107,8 +107,8 @@ export function createActorMessageTransport({
      if(actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
       activeIncarnations.delete(actorKey);
     }).catch(()=>{});
-   else if(worker&&actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
-    activeIncarnations.delete(actorKey);
+   // A void terminate() supplies no physical-retirement receipt.
+   // Keep the identity reserved until another trusted barrier proves exit.
   }catch{}
   fail("trusted dedicated Worker required");
  }
@@ -122,21 +122,29 @@ export function createActorMessageTransport({
  done.catch(()=>{});
  const clear=()=>{if(deadline!==undefined){clearTimeout(deadline);deadline=undefined}};
  const arm=()=>{if(finished)return;clear();deadline=setTimeout(()=>fatal(Error("isolated actor Worker deadline exceeded")),timeoutMs)};
- const cleanup=()=>{
+ const cleanup=(guestQuiesced=false)=>{
   clear();
   for(const [kind,cb] of [["message",onMessage],["error",onError],["messageerror",onError],["exit",onExit]])
    try{worker.removeEventListener(kind,cb)}catch{}
   let termination;
   try{termination=worker.terminate()}
-  catch(error){termination=Promise.reject(error)}
-  // Do not release the actor identity before the OS/Worker carrier confirms
-  // termination. If termination fails, fail closed: retain the lease.
-  return Promise.resolve(termination).then(()=>{
+  catch(error){return Promise.reject(error)}
+  const release=()=>{
    if(actorKey!==undefined&&activeIncarnations.get(actorKey)===incarnation)
     activeIncarnations.delete(actorKey);
-  });
+  };
+  // Node worker_threads returns a completion Promise. Browser Workers return
+  // void from terminate(): that alone does not prove the old guest exited.
+  // Only an exact, validated STOPPED receipt after teardown proves quiescence
+  // for the synchronous actor protocol in a non-awaitable Worker adapter.
+  if(termination&&typeof termination.then==="function")
+   return Promise.resolve(termination).then(release);
+  if(actorKey!==undefined&&!guestQuiesced)
+   return Promise.reject(Error("nonawaitable Worker termination did not confirm actor retirement"));
+  release();
+  return Promise.resolve();
  };
- const complete=(error,notifySupervisor=true)=>{
+ const complete=(error,notifySupervisor=true,guestQuiesced=false)=>{
   if(finished)return;
   finished=true;sealed=true;terminalError=error||null;
   // Cancel every pending serializer immediately; no rejected actor may leave
@@ -151,7 +159,7 @@ export function createActorMessageTransport({
   // receipt; cancellation/panic must scrub it, too.
   scrubOwned(active?.frame);
   active=null;pending=0;
-  cleanup().then(()=>{
+  cleanup(guestQuiesced).then(()=>{
    if(error){
     if(notifySupervisor)try{onSupervisorPanic?.({type:"ACTOR_TRANSPORT_FAILURE",reason:String(error.message||error)})}catch{}
     doneReject(error);
@@ -217,7 +225,9 @@ export function createActorMessageTransport({
    scrubOwned(active.frame);
    active.frame=null;active=null;pending--;pump();return
   }
-  if(m.kind==="oreslang-v2-stopped"&&stopping&&active===null&&pending===0){complete();return}
+  if(m.kind==="oreslang-v2-stopped"&&stopping&&active===null&&pending===0){
+   complete(null,true,true);return
+  }
   fatal(Error("invalid actor worker lifecycle or receipt"));
  };
  try{
