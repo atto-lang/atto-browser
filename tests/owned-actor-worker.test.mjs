@@ -240,3 +240,29 @@ test("schema arrays cannot hide custom map methods or accessor elements",async()
  const accessor={schemaVersion:1,ownership:"copy",variants:[{id:1,name:"Compute",fields}]};
  await assert.rejects(encodeMessage(accessor,{variant:"Compute",fields:{n:1n}}),/accessor variant fields/);
 });
+
+
+test("schema getters and toJSON hooks fail before Worker creation without executing callbacks",()=>{
+ let invoked=0,spawned=0;
+ const factory=()=>{spawned++;return actualNodeWorker()};
+ const getter={...schema};
+ Object.defineProperty(getter,"variants",{enumerable:true,get(){invoked++;return schema.variants}});
+ assert.throws(()=>createOwnedActorWorker({schema:getter,workerFactory:factory}),/invalid schema admission/);
+ const hook={...schema,toJSON(){invoked++;return schema}};
+ assert.throws(()=>createOwnedActorWorker({schema:hook,workerFactory:factory}),/invalid schema admission/);
+ const accessorField={name:"n"};
+ Object.defineProperty(accessorField,"type",{enumerable:true,get(){invoked++;return "i64"}});
+ const nested={...schema,variants:[{id:1,name:"Compute",fields:[accessorField]}]};
+ assert.throws(()=>createOwnedActorWorker({schema:nested,workerFactory:factory}),/invalid schema admission/);
+ assert.equal(invoked,0);
+ assert.equal(spawned,0);
+});
+test("owned envelope rejects accessor-backed payload fields and prototype fields",async()=>{
+ let invoked=0;
+ const message={variant:"Compute",fields:{text:"safe"}};
+ Object.defineProperty(message.fields,"n",{enumerable:true,get(){invoked++;return 4n}});
+ await assert.rejects(encodeMessage(schema,message),/invalid message fields shape/);
+ assert.equal(invoked,0);
+ const inherited=Object.create({text:"inherited",n:4n});
+ await assert.rejects(encodeMessage(schema,{variant:"Compute",fields:inherited}),/invalid message fields shape/);
+});
