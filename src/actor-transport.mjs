@@ -13,7 +13,9 @@ export function createActorMessageTransport({
  // caller cannot allocate/clone arbitrarily large strings outside quotas.
  if(typeof schemaId!=="string"||typeof descriptor!=="string"||
     schemaId.length===0||descriptor.length===0||
-    schemaId.length>512||descriptor.length>4096)
+    schemaId.length>512||descriptor.length>4096||
+    new TextEncoder().encode(schemaId).length>512||
+    new TextEncoder().encode(descriptor).length>4096)
   fail("invalid schema or descriptor byte budget");
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>4096)fail("invalid capacity");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid deadline");
