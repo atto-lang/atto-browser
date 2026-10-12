@@ -68,3 +68,28 @@ test("real Worker accepts unique tickets and drains without a second receipt",as
   assert.equal((await exchange(w,{kind:"oreslang-v2-control",action:"drain"})).kind,"oreslang-v2-stopped");
  }finally{await w.terminate()}
 });
+
+
+test("real Worker rejects malformed INIT metadata before advertising READY",async()=>{
+ const invalid=[
+  {schemaId:"",descriptor:"T[S,I]"},
+  {schemaId:"x".repeat(257),descriptor:"T[S,I]"},
+  {schemaId:"a\nb",descriptor:"T[S,I]"},
+  {schemaId:"🌐",descriptor:"T[S,I]"},
+  {schemaId:contract.schemaId,descriptor:""},
+  {schemaId:contract.schemaId,descriptor:"x".repeat(4097)},
+  {schemaId:contract.schemaId,descriptor:"T[S,\nI]"},
+  {schemaId:contract.schemaId,descriptor:"T[S"},
+  {schemaId:contract.schemaId,descriptor:"T[Q]"},
+  {schemaId:contract.schemaId,descriptor:"L[]"},
+  {schemaId:contract.schemaId,descriptor:"T[S,I]]"}
+ ];
+ for(const metadata of invalid){
+  const w=new Worker(workerUrl,{type:"module"});
+  try{
+   const response=await exchange(w,{kind:"oreslang-v2-init",...metadata});
+   assert.deepEqual(response,{kind:"oreslang-v2-panic"},
+    "invalid INIT must not produce READY or accept DATA");
+  }finally{await w.terminate()}
+ }
+});

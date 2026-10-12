@@ -32,3 +32,31 @@ Run the same SHA-pinned guest in actual Chromium/Firefox Web Workers via a brows
 ## Cancellation contract
 
 `signal` is optional and must be AbortSignal-like. If already aborted, the host rejects without creating a Worker. An abort after admission terminates the dedicated Worker, clears its timeout and listeners, and settles once. It does not guarantee that a guest has independently released external side effects; verified core scalar guests currently have zero imports. A future supervised actor protocol must additionally send CONTROL cancellation and reconcile any external ownership transfers.
+
+
+## Real Chromium/Firefox transport smoke test
+
+The real-browser smoke test is deliberately separate from the default Node
+Worker-shim suite. Run it with Node 22+, the pinned \`playwright@1.56.1\`
+package, and downloaded Chromium/Firefox engines:
+
+\`\`\`sh
+npm install --no-save --no-package-lock --ignore-scripts playwright@1.56.1
+npx playwright install --with-deps chromium firefox
+ORESLANG_WASM_RUNTIME_BINARY=../oreslang-wasm/build/oreslang_rt.wasm \
+  node scripts/verify-real-browser-workers.mjs
+\`\`\`
+
+The fixture starts a loopback-only, no-store static HTTP server and tests
+**real browser module Workers**, concurrent FIFO DATA admission, CONTROL
+draining, duplicate-ticket replay rejection, and browser-side loading of
+an independently built real Wasm C ABI runtime with the clock capability.
+The runtime binary must exist; it is not a stand-in or synthesized by the
+smoke test. Both engines must pass: no skip, browser error, or fallback to
+Node Worker shims counts as success.
+
+This proves transport and the C-runtime browser loader, **not** execution
+of compiler-generated Oreslang actor handlers, Java/LLVM source conformance,
+arbitrary guest safety, or a trustworthy sandbox. The browser implementation
+still requires supervision, cancellation and actual guest-actor lowering
+end-to-end before production release.
