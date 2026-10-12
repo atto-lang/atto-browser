@@ -29,7 +29,12 @@ function type(t,d=0,ctx){
  const k=ks[0];
  if(k==="tuple"){
   if(!Array.isArray(t.tuple)||t.tuple.length>64)fail("invalid tuple");
-  return {tuple:t.tuple.map(x=>type(x,d+1,ctx))};
+  const elements=[];
+  for(let i=0;i<t.tuple.length;i++){
+   if(!Object.hasOwn(t.tuple,i))fail("sparse tuple descriptor");
+   elements.push(type(t.tuple[i],d+1,ctx));
+  }
+  return {tuple:elements};
  }
  if(k==="array"||k==="list"){
   shape(t[k],k==="array"?["element","length"]:["element","maxLength"],k);
@@ -113,7 +118,11 @@ function encode(w,t,x,d=0){
  }
  if(Object.hasOwn(t,"tuple")){
   if(!Array.isArray(x)||x.length!==t.tuple.length)fail("tuple arity mismatch");
-  t.tuple.forEach((a,i)=>encode(w,a,x[i],d+1));return;
+  for(let i=0;i<t.tuple.length;i++){
+   if(!Object.hasOwn(x,i))fail("sparse tuple element");
+   encode(w,t.tuple[i],x[i],d+1);
+  }
+  return;
  }
  if(Object.hasOwn(t,"array")||Object.hasOwn(t,"list")){
   const fixed=Object.hasOwn(t,"array"),spec=fixed?t.array:t.list;
