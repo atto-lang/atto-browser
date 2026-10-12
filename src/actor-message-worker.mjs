@@ -143,6 +143,10 @@ self.addEventListener("message",async event=>{
   // Decode owns a snapshot before WebCrypto. Never expose incoming mutable
   // frame bytes to an untrusted actor callback or reuse borrowed buffers.
   const decoded=await decodeActorMessageV2({...contract,bytes:data.frame});
+  // Decoding yields to WebCrypto. A replay, bad DATA or failed CONTROL can
+  // terminally panic the actor while this turn is suspended. A receipt fence
+  // alone is insufficient: no source actor code may START after that panic.
+  if(closed)return;
   const actorResult=guestHandler===null?undefined:guestHandler(decoded);
   if(guestHandler!==null&&typeof actorResult!=="bigint")
    throw Error("compiled actor handler must return signed i64");
@@ -161,6 +165,9 @@ self.addEventListener("message",async event=>{
 });
 function panic(){
  if(closed)return;closed=true;
+ // Revoke the compiled handler immediately. Even a pending decoder must not
+ // retain an executable actor entry point after terminal shutdown.
+ guestHandler=null;
  // No user-defined actor hook may intercept this terminal CONTROL failure.
  self.postMessage({kind:"oreslang-v2-panic"});
 }
