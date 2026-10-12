@@ -78,7 +78,11 @@ test("real Worker rejects malformed INIT metadata before advertising READY",asyn
   {schemaId:"🌐",descriptor:"T[S,I]"},
   {schemaId:contract.schemaId,descriptor:""},
   {schemaId:contract.schemaId,descriptor:"x".repeat(4097)},
-  {schemaId:contract.schemaId,descriptor:"T[S,\nI]"}
+  {schemaId:contract.schemaId,descriptor:"T[S,\nI]"},
+  {schemaId:contract.schemaId,descriptor:"T[S"},
+  {schemaId:contract.schemaId,descriptor:"T[Q]"},
+  {schemaId:contract.schemaId,descriptor:"L[]"},
+  {schemaId:contract.schemaId,descriptor:"T[S,I]]"}
  ];
  for(const metadata of invalid){
   const w=new Worker(workerUrl,{type:"module"});
