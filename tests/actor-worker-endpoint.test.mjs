@@ -68,3 +68,24 @@ test("real Worker accepts unique tickets and drains without a second receipt",as
   assert.equal((await exchange(w,{kind:"oreslang-v2-control",action:"drain"})).kind,"oreslang-v2-stopped");
  }finally{await w.terminate()}
 });
+
+test("real Worker rejects invalid canonical INIT before READY",async()=>{
+ for(const malformed of [
+  {schemaId:"x".repeat(257),descriptor:"I"},
+  {schemaId:"x",descriptor:"T[S,]"},
+  {schemaId:"x",descriptor:"A[]"},
+  {schemaId:"x",descriptor:"T[S,I]junk"},
+  {schemaId:"🌐",descriptor:"I"},
+  {schemaId:"x",descriptor:"A[".repeat(65)+"I"+"]".repeat(65)},
+ ]){
+  const w=new Worker(workerUrl,{type:"module"});
+  try{
+   assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...malformed}),
+    {kind:"oreslang-v2-panic"});
+   // An invalid initialization permanently seals the endpoint. It may not
+   // later acknowledge DATA using a forged contract or transition to READY.
+   w.postMessage({kind:"oreslang-v2-init",...contract});
+   // No additional protocol output is permitted after terminal panic.
+  }finally{await w.terminate()}
+ }
+});
