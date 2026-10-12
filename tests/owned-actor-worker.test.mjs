@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Worker} from "node:worker_threads";
 import {createOwnedActorWorker} from "../src/owned-actor-host.mjs";
+import {encodeMessage,decodeMessage} from "../src/owned-message/owned-envelope.mjs";
 
 const schema={schemaVersion:1,ownership:"copy",variants:[
  {id:1,name:"Compute",fields:[{name:"text",type:"string"},{name:"n",type:"i64"}]},
@@ -103,4 +104,48 @@ test("unsolicited reply id fails closed without trusting worker results",async()
  const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:1000});
  await assert.rejects(actor.request(compute("x",1)),/invalid actor Worker response/);
  assert.equal(terminated,1);
+});
+
+
+test("sparse tuple descriptor is rejected before canonical schema hashing",async()=>{
+ const holes=new Array(1);
+ const schemaWithHole={schemaVersion:1,ownership:"copy",variants:[{
+  id:1,name:"Compute",fields:[{name:"items",type:{tuple:holes}}]
+ }]};
+ await assert.rejects(encodeMessage(schemaWithHole,{variant:"Compute",fields:{items:[[]]}}),/sparse tuple descriptor/);
+ await assert.rejects(decodeMessage(schemaWithHole,Uint8Array.of(0)),/sparse tuple descriptor/);
+});
+test("sparse tuple values cannot suppress zero-byte element accounting",async()=>{
+ const s={schemaVersion:1,ownership:"copy",variants:[{
+  id:1,name:"Compute",fields:[{name:"items",type:{tuple:[{tuple:[]}]}}]
+ }]};
+ await assert.rejects(encodeMessage(s,{variant:"Compute",fields:{items:new Array(1)}}),/sparse tuple element/);
+ const dense={variant:"Compute",fields:{items:[[]]}};
+ assert.deepEqual(await decodeMessage(s,await encodeMessage(s,dense)),dense);
+});
+test("actor reservation expires even if WebCrypto encoding never settles",{timeout:2000},async()=>{
+ let onMessage,terminated=0,requestsPosted=0;
+ const fake=()=>({
+  addEventListener(k,cb){if(k==="message")onMessage=cb},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-owned-actor-init-v1")
+    queueMicrotask(()=>onMessage({data:{kind:"oreslang-owned-actor-ready-v1",ok:true}}));
+   else requestsPosted++;
+  },
+  terminate(){terminated++}
+ });
+ const actor=await createOwnedActorWorker({schema,workerFactory:fake,timeoutMs:25});
+ const original=Object.getOwnPropertyDescriptor(globalThis,"crypto");
+ try{
+  Object.defineProperty(globalThis,"crypto",{configurable:true,value:{subtle:{digest:()=>new Promise(()=>{})}}});
+  await assert.rejects(actor.request(compute("stuck",7)),/deadline exceeded/);
+  assert.equal(actor.pending,0);
+  assert.equal(requestsPosted,0);
+  assert.equal(terminated,1);
+ }finally{
+  if(original)Object.defineProperty(globalThis,"crypto",original);
+  else delete globalThis.crypto;
+  actor.close();
+ }
 });
