@@ -22,13 +22,13 @@ function unique(a,label){if(new Set(a).size!==a.length)fail("duplicate "+label);
 // control normalization or the hashed contract identity.
 function denseSchemaArray(a,label,min,max){
  if(!Array.isArray(a)||a.length<min||a.length>max)fail("invalid "+label);
- if(Object.getPrototypeOf(a)!==Array.prototype||
-    Reflect.ownKeys(a).length!==a.length+1)fail("noncanonical "+label);
+ if(Object.getPrototypeOf(a)!==Array.prototype)fail("noncanonical "+label);
  for(let i=0;i<a.length;i++){
   const slot=Object.getOwnPropertyDescriptor(a,String(i));
   if(!slot)fail("sparse "+label);
   if(!Object.hasOwn(slot,"value"))fail("accessor "+label);
  }
+ if(Reflect.ownKeys(a).length!==a.length+1)fail("noncanonical "+label);
 }
 function name(x){if(typeof x!=="string"||!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(x))fail("invalid name");return x;}
 function id(x){if(!Number.isInteger(x)||x<1||x>65535)fail("invalid ID");return x;}
