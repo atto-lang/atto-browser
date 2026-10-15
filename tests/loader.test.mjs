@@ -95,3 +95,11 @@ test("shared view cannot conceal backing storage behind an own buffer property",
  Object.defineProperty(input,"buffer",{value:bytes.buffer});
  assert.throws(()=>inspectWasmBytes(input),/shared Wasm input memory/);
 });
+
+test("foreign-realm shared Wasm views cannot bypass backing-store admission",async()=>{
+ const {runInNewContext}=await import("node:vm");
+ const foreign=runInNewContext("new Uint8Array(new SharedArrayBuffer(8))");
+ foreign.set([0,97,115,109,1,0,0,0]);
+ assert.equal(foreign.buffer instanceof SharedArrayBuffer,false);
+ assert.throws(()=>inspectWasmBytes(foreign),/shared Wasm input memory/);
+});

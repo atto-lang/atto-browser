@@ -18,6 +18,9 @@ const intrinsicByteLength=Object.getOwnPropertyDescriptor(typedArrayPrototype,"b
 const intrinsicBuffer=Object.getOwnPropertyDescriptor(typedArrayPrototype,"buffer").get;
 const intrinsicByteOffset=Object.getOwnPropertyDescriptor(typedArrayPrototype,"byteOffset").get;
 const arrayBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+function isOrdinaryBuffer(buffer){
+ try{arrayBufferLength.call(buffer);return true;}catch{return false;}
+}
 const dataViewLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
 const dataViewBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
 const dataViewOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
@@ -25,7 +28,7 @@ const intrinsicSet=Uint8Array.prototype.set;
 function ownedByteLength(value){
  if(!(value instanceof Uint8Array))fail("expected Uint8Array");
  const buffer=intrinsicBuffer.call(value);
- if(typeof SharedArrayBuffer!=="undefined"&&buffer instanceof SharedArrayBuffer)
+ if(!isOrdinaryBuffer(buffer))
   fail("shared memory not admitted");
  return intrinsicByteLength.call(value);
 }
@@ -219,7 +222,7 @@ function snapshot(input,maxBytes){
   buffer=(isDataView?dataViewBuffer:intrinsicBuffer).call(input);
   offset=(isDataView?dataViewOffset:intrinsicByteOffset).call(input);
   length=(isDataView?dataViewLength:intrinsicByteLength).call(input);
-  if(typeof SharedArrayBuffer!=="undefined"&&buffer instanceof SharedArrayBuffer)
+  if(!isOrdinaryBuffer(buffer))
    fail("shared memory not admitted");
  }else fail("expected message bytes");
  if(length<HEADER||length>maxBytes)fail("invalid message size");
