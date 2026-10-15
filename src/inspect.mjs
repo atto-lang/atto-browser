@@ -1,3 +1,10 @@
+const typedPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const viewBuffer=Object.getOwnPropertyDescriptor(typedPrototype,"buffer").get;
+const viewOffset=Object.getOwnPropertyDescriptor(typedPrototype,"byteOffset").get;
+const viewLength=Object.getOwnPropertyDescriptor(typedPrototype,"byteLength").get;
+const dataBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dataOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const dataLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
 /**
  * Small, bounded reader for the pieces of core Wasm required to enforce
  * loader policy. This is *not* a general Wasm parser or execution sandbox.
@@ -11,9 +18,13 @@ export function inspectWasmBytes(input,{maxModuleBytes=1048576,maxMemoryPages=32
  else if(ArrayBuffer.isView(input)){
   // A concurrently writable SharedArrayBuffer can race input admission.
   // Only caller-owned, non-shared bytes may be snapshotted for verification.
-  if(typeof SharedArrayBuffer!=="undefined"&&input.buffer instanceof SharedArrayBuffer)
+  const dataView=input instanceof DataView;
+  const buffer=(dataView?dataBuffer:viewBuffer).call(input);
+  const offset=(dataView?dataOffset:viewOffset).call(input);
+  const length=(dataView?dataLength:viewLength).call(input);
+  if(typeof SharedArrayBuffer!=="undefined"&&buffer instanceof SharedArrayBuffer)
    throw new TypeError("shared Wasm input memory is not admitted");
-  bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
+  bytes=new Uint8Array(buffer,offset,length);
  }
  else throw new TypeError("expected a Wasm ArrayBuffer or typed array");
  if(bytes.byteLength>maxModuleBytes)throw new Error("Wasm module exceeds maximum byte size");
