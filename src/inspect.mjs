@@ -1,3 +1,7 @@
+const ordinaryBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+function isOrdinaryBuffer(buffer){
+ try{ordinaryBufferLength.call(buffer);return true;}catch{return false;}
+}
 const typedPrototype=Object.getPrototypeOf(Uint8Array.prototype);
 const viewBuffer=Object.getOwnPropertyDescriptor(typedPrototype,"buffer").get;
 const viewOffset=Object.getOwnPropertyDescriptor(typedPrototype,"byteOffset").get;
@@ -22,7 +26,7 @@ export function inspectWasmBytes(input,{maxModuleBytes=1048576,maxMemoryPages=32
   const buffer=(dataView?dataBuffer:viewBuffer).call(input);
   const offset=(dataView?dataOffset:viewOffset).call(input);
   const length=(dataView?dataLength:viewLength).call(input);
-  if(typeof SharedArrayBuffer!=="undefined"&&buffer instanceof SharedArrayBuffer)
+  if(!isOrdinaryBuffer(buffer))
    throw new TypeError("shared Wasm input memory is not admitted");
   bytes=new Uint8Array(buffer,offset,length);
  }
