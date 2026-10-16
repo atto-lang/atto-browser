@@ -11,12 +11,57 @@ const SCHEMA_NODES=4096, SCHEMA_BYTES=65536;
 const magic=Uint8Array.of(79,82,77,49);
 const enc=new TextEncoder(),dec=new TextDecoder("utf-8",{fatal:true});
 const prim=new Set(["string","i64","bool","bytes"]);
+// Use typed-array intrinsic slots, never caller-controlled iterators, length,
+// buffer getters or subclass species when copying owned byte values.
+const typedArrayPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const intrinsicByteLength=Object.getOwnPropertyDescriptor(typedArrayPrototype,"byteLength").get;
+const intrinsicBuffer=Object.getOwnPropertyDescriptor(typedArrayPrototype,"buffer").get;
+const intrinsicByteOffset=Object.getOwnPropertyDescriptor(typedArrayPrototype,"byteOffset").get;
+const arrayBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+function isOrdinaryBuffer(buffer){
+ try{arrayBufferLength.call(buffer);return true;}catch{return false;}
+}
+const dataViewLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
+const dataViewBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dataViewOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const intrinsicSet=Uint8Array.prototype.set;
+function ownedByteLength(value){
+ if(!(value instanceof Uint8Array))fail("expected Uint8Array");
+ const buffer=intrinsicBuffer.call(value);
+ if(!isOrdinaryBuffer(buffer))
+  fail("shared memory not admitted");
+ return intrinsicByteLength.call(value);
+}
 const plain=x=>x!==null&&typeof x==="object"&&[Object.prototype,null].includes(Object.getPrototypeOf(x));
 const fail=reason=>{throw new TypeError("Oreslang envelope: "+reason)};
-function shape(x,keys,name){
- if(!plain(x)||Object.keys(x).some(k=>!keys.includes(k)))fail("invalid "+name+" shape");
+function shape(x,keys,name,required=[]){
+ if(!plain(x))fail("invalid "+name+" shape");
+ // Do not read getters or trust inherited schema declarations. The hash
+ // must describe own enumerable data rather than accessor side effects.
+ for(const key of Reflect.ownKeys(x)){
+  const desc=Object.getOwnPropertyDescriptor(x,key);
+  if(typeof key!=="string"||!keys.includes(key)||
+     !desc?.enumerable||!Object.hasOwn(desc,"value"))
+   fail("invalid "+name+" shape");
+ }
+ for(const key of required){
+  if(!Object.hasOwn(x,key))fail("missing "+name+" field "+key);
+ }
 }
 function unique(a,label){if(new Set(a).size!==a.length)fail("duplicate "+label);}
+// Every schema-bearing array must contain exactly its declared own data
+// slots. Array.map() skips holes, and instance method shadowing must not
+// control normalization or the hashed contract identity.
+function denseSchemaArray(a,label,min,max){
+ if(!Array.isArray(a)||a.length<min||a.length>max)fail("invalid "+label);
+ if(Object.getPrototypeOf(a)!==Array.prototype)fail("noncanonical "+label);
+ for(let i=0;i<a.length;i++){
+  const slot=Object.getOwnPropertyDescriptor(a,String(i));
+  if(!slot)fail("sparse "+label);
+  if(!Object.hasOwn(slot,"value"))fail("accessor "+label);
+ }
+ if(Reflect.ownKeys(a).length!==a.length+1)fail("noncanonical "+label);
+}
 function name(x){if(typeof x!=="string"||!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(x))fail("invalid name");return x;}
 function id(x){if(!Number.isInteger(x)||x<1||x>65535)fail("invalid ID");return x;}
 function bound(x){if(!Number.isInteger(x)||x<0||x>ITEMS)fail("invalid element bound");return x;}
@@ -28,17 +73,23 @@ function type(t,d=0,ctx){
  const ks=Object.keys(t);if(ks.length!==1)fail("exactly one type required");
  const k=ks[0];
  if(k==="tuple"){
-  if(!Array.isArray(t.tuple)||t.tuple.length>64)fail("invalid tuple");
-  return {tuple:t.tuple.map(x=>type(x,d+1,ctx))};
+  denseSchemaArray(t.tuple,"tuple descriptor",0,64);
+  const elements=[];
+  for(let i=0;i<t.tuple.length;i++){
+   if(!Object.hasOwn(t.tuple,i))fail("sparse tuple descriptor");
+   elements.push(type(t.tuple[i],d+1,ctx));
+  }
+  return {tuple:elements};
  }
  if(k==="array"||k==="list"){
-  shape(t[k],k==="array"?["element","length"]:["element","maxLength"],k);
+  shape(t[k],k==="array"?["element","length"]:["element","maxLength"],k,
+   k==="array"?["element","length"]:["element","maxLength"]);
   return {[k]:k==="array"?{element:type(t[k].element,d+1,ctx),length:bound(t[k].length)}
     :{element:type(t[k].element,d+1,ctx),maxLength:bound(t[k].maxLength)}};
  }
- if(!Array.isArray(t.enum)||t.enum.length<1||t.enum.length>256)fail("invalid enum");
+ denseSchemaArray(t.enum,"enum alternatives",1,256);
  const vs=t.enum.map(v=>{
-  shape(v,["id","name","payload"],"enum variant");
+  shape(v,["id","name","payload"],"enum variant",["id","name","payload"]);
   if(!Object.hasOwn(v,"payload"))fail("enum payload declaration required");
   return {id:id(v.id),name:name(v.name),payload:v.payload===null?null:type(v.payload,d+1,ctx)};
  });
@@ -46,14 +97,14 @@ function type(t,d=0,ctx){
  return {enum:vs.sort((a,b)=>a.id-b.id)};
 }
 function contract(c){
- shape(c,["schemaVersion","ownership","variants"],"contract");
+ shape(c,["schemaVersion","ownership","variants"],"contract",["schemaVersion","ownership","variants"]);
  if(c.schemaVersion!==1||c.ownership!=="copy")fail("unsupported contract version/ownership");
- if(!Array.isArray(c.variants)||c.variants.length<1||c.variants.length>256)fail("invalid variants");
+ denseSchemaArray(c.variants,"contract variants",1,256);
  const ctx={nodes:0};
  const vs=c.variants.map(v=>{
-  shape(v,["id","name","fields"],"variant");
-  if(!Array.isArray(v.fields)||v.fields.length>64)fail("invalid fields");
-  const fields=v.fields.map(f=>{shape(f,["name","type"],"field");return{name:name(f.name),type:type(f.type,0,ctx)}});
+  shape(v,["id","name","fields"],"variant",["id","name","fields"]);
+  denseSchemaArray(v.fields,"variant fields",0,64);
+  const fields=v.fields.map(f=>{shape(f,["name","type"],"field",["name","type"]);return{name:name(f.name),type:type(f.type,0,ctx)}});
   unique(fields.map(f=>f.name),"field");
   return {id:id(v.id),name:name(v.name),fields};
  });
@@ -63,6 +114,9 @@ function contract(c){
  if(enc.encode(JSON.stringify(normalized)).length>SCHEMA_BYTES)fail("schema byte budget exceeded");
  return normalized;
 }
+// Synchronous canonical clone for host admission: never JSON.stringify the
+// caller-supplied object, which could invoke a toJSON hook or a getter.
+export function normalizeOwnedContract(schema){return contract(schema)}
 async function digest(c){
  if(!globalThis.crypto?.subtle)fail("WebCrypto SHA-256 required");
  return new Uint8Array(await crypto.subtle.digest("SHA-256",
@@ -81,9 +135,11 @@ function stringBytes(s){
 class Writer{
  constructor(limit){this.parts=[];this.size=0;this.limit=limit;this.visits=0;}
  visit(){if(++this.visits>ITEMS)fail("value node budget exceeded");}
- put(b){if(!(b instanceof Uint8Array)||b.length>this.limit-this.size)fail("byte budget exceeded");
-  if(typeof SharedArrayBuffer!=="undefined"&&b.buffer instanceof SharedArrayBuffer)fail("shared memory not admitted");
-  this.parts.push(Uint8Array.from(b));this.size+=b.length;}
+ put(b){const n=ownedByteLength(b);
+  if(n>this.limit-this.size)fail("byte budget exceeded");
+  const copy=new Uint8Array(n);
+  intrinsicSet.call(copy,b);
+  this.parts.push(copy);this.size+=n;}
  u8(n){this.put(Uint8Array.of(n));}
  u16(n){const b=new Uint8Array(2);new DataView(b.buffer).setUint16(0,n,true);this.put(b);}
  u32(n){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n,true);this.put(b);}
@@ -108,27 +164,31 @@ function encode(w,t,x,d=0){
  if(t==="bool"){if(typeof x!=="boolean")fail("expected bool");return w.u8(x?1:0);}
  if(t==="string"||t==="bytes"){
   const b=t==="string"?stringBytes(x):x;
-  if(!(b instanceof Uint8Array))fail("expected Uint8Array");
-  w.u32(b.length);return w.put(b);
+  const n=ownedByteLength(b);
+  w.u32(n);return w.put(b);
  }
  if(Object.hasOwn(t,"tuple")){
   if(!Array.isArray(x)||x.length!==t.tuple.length)fail("tuple arity mismatch");
-  t.tuple.forEach((a,i)=>encode(w,a,x[i],d+1));return;
+  // Do not execute getters, inherited slots or shadowed array methods while
+  // constructing an owned payload. Check all elements before writing bytes.
+  denseSchemaArray(x,"tuple element",t.tuple.length,t.tuple.length);
+  for(let i=0;i<t.tuple.length;i++){
+   encode(w,t.tuple[i],x[i],d+1);
+  }
+  return;
  }
  if(Object.hasOwn(t,"array")||Object.hasOwn(t,"list")){
   const fixed=Object.hasOwn(t,"array"),spec=fixed?t.array:t.list;
   if(!Array.isArray(x)||(fixed?x.length!==spec.length:x.length>spec.maxLength))fail("array/list length");
+  denseSchemaArray(x,"array/list element",0,ITEMS);
   if(!fixed)w.u32(x.length);
-  // Array.forEach skips sparse holes. With a zero-byte element type this
-  // would silently encode fewer values than the declared length, defeating
-  // node budgets and canonical typed-message round trips.
+  // Dense own-data slots prevent getter side effects or inherited values.
   for(let i=0;i<x.length;i++){
-   if(!Object.hasOwn(x,i))fail("sparse array/list element");
    encode(w,spec.element,x[i],d+1);
   }
   return;
  }
- shape(x,["variant","value"],"enum value");
+ shape(x,["variant","value"],"enum value",["variant","value"]);
  const v=t.enum.find(a=>a.name===x.variant);if(!v)fail("unknown enum alternative");
  w.u16(v.id);
  if(v.payload===null){if(x.value!==null)fail("unit enum must be null");}
@@ -151,21 +211,32 @@ function decode(r,t,d=0){
  const variantId=r.u16();const v=t.enum.find(a=>a.id===variantId);if(!v)fail("unknown enum ID");
  return Object.freeze({variant:v.name,value:v.payload===null?null:decode(r,v.payload,d+1)});
 }
-function snapshot(input){
- if(input instanceof ArrayBuffer)return Uint8Array.from(new Uint8Array(input));
- if(ArrayBuffer.isView(input)){
-  if(typeof SharedArrayBuffer!=="undefined"&&input.buffer instanceof SharedArrayBuffer)fail("shared memory not admitted");
-  return Uint8Array.from(new Uint8Array(input.buffer,input.byteOffset,input.byteLength));
- }
- fail("expected message bytes");
+function snapshot(input,maxBytes){
+ // Bound BEFORE copying and use intrinsic buffer/view slots. An untrusted
+ // view may shadow .buffer, .byteLength, .byteOffset or [Symbol.iterator].
+ let buffer,offset=0,length;
+ if(input instanceof ArrayBuffer){
+  buffer=input;length=arrayBufferLength.call(input);
+ }else if(ArrayBuffer.isView(input)){
+  const isDataView=input instanceof DataView;
+  buffer=(isDataView?dataViewBuffer:intrinsicBuffer).call(input);
+  offset=(isDataView?dataViewOffset:intrinsicByteOffset).call(input);
+  length=(isDataView?dataViewLength:intrinsicByteLength).call(input);
+  if(!isOrdinaryBuffer(buffer))
+   fail("shared memory not admitted");
+ }else fail("expected message bytes");
+ if(length<HEADER||length>maxBytes)fail("invalid message size");
+ const copy=new Uint8Array(length);
+ intrinsicSet.call(copy,new Uint8Array(buffer,offset,length));
+ return copy;
 }
 function budget(n){if(!Number.isSafeInteger(n)||n<HEADER||n>LIMIT)fail("invalid maxBytes");}
 export async function encodeMessage(schema,message,{maxBytes=LIMIT}={}){
  budget(maxBytes);
  const c=contract(schema);
- shape(message,["variant","fields"],"message");
+ shape(message,["variant","fields"],"message",["variant","fields"]);
  const v=c.variants.find(x=>x.name===message.variant);if(!v)fail("unknown message variant");
- shape(message.fields,v.fields.map(x=>x.name),"message fields");
+ shape(message.fields,v.fields.map(x=>x.name),"message fields",v.fields.map(x=>x.name));
  if(Object.keys(message.fields).length!==v.fields.length)fail("missing message field");
  const w=new Writer(maxBytes-HEADER);for(const f of v.fields)encode(w,f.type,message.fields[f.name]);
  // Payload bytes and normalized schema are snapshotted before any await.
@@ -175,8 +246,7 @@ export async function encodeMessage(schema,message,{maxBytes=LIMIT}={}){
  dv.setUint32(8,payload.length,true);result.set(hash,12);result.set(payload,HEADER);return result;
 }
 export async function decodeMessage(schema,input,{maxBytes=LIMIT}={}){
- budget(maxBytes);const c=contract(schema),bytes=snapshot(input);
- if(bytes.length<HEADER||bytes.length>maxBytes)fail("invalid message size");
+ budget(maxBytes);const c=contract(schema),bytes=snapshot(input,maxBytes);
  const r=new Reader(bytes);for(const m of magic)if(r.u8()!==m)fail("bad magic");
  if(r.u8()!==1||r.u8()!==0)fail("unknown version/flags");
  const variantId=r.u16(),n=r.u32(),received=r.take(32);

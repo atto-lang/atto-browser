@@ -3,7 +3,7 @@
  * The guest Worker is real, but the handler is not Oreslang-compiled code.
  * Every request crosses the Worker boundary as an owned typed envelope.
  */
-import {encodeMessage,decodeMessage} from "./owned-message/owned-envelope.mjs";
+import {encodeMessage,decodeMessage,normalizeOwnedContract} from "./owned-message/owned-envelope.mjs";
 
 const fail=reason=>{throw new TypeError("Oreslang owned actor Worker: "+reason)};
 export function createOwnedActorWorker({
@@ -13,7 +13,7 @@ export function createOwnedActorWorker({
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid timeout");
  if(!Number.isSafeInteger(maxBytes)||maxBytes<44||maxBytes>1048576)fail("invalid maxBytes");
  let snapped;
- try{snapped=JSON.parse(JSON.stringify(schema));}catch{fail("invalid schema serialization")}
+ try{snapped=normalizeOwnedContract(schema);}catch{fail("invalid schema admission")}
  if(!snapped||typeof snapped!=="object"||Array.isArray(snapped))fail("invalid schema");
  const make=workerFactory||(()=>{
   if(typeof Worker!=="function")fail("Web Worker unavailable");
@@ -61,6 +61,12 @@ export function createOwnedActorWorker({
    return;
   }
   const entry=outstanding.get(data.id);
+  // Correlation alone is insufficient: a reserved but never published ID
+  // cannot be completed by an unsolicited early Worker event.
+  if(!entry.sent){
+   cancelAll(new Error("reply before actor Worker request publication"));
+   return;
+  }
   if(entry.verifying){
    cancelAll(new Error("duplicate actor Worker response"));
    return;
@@ -76,6 +82,12 @@ export function createOwnedActorWorker({
   Promise.resolve().then(()=>decodeMessage(snapped,data.bytes,{maxBytes})).then(
    reply=>{
     if(closed)return;
+    // A valid ORM1 envelope may still carry the wrong language-level type.
+    // This isolated reference Worker only permits Compute -> Result.
+    if(reply.variant!=="Result"){
+     cancelAll(new Error("unadmitted actor Worker reply variant"));
+     return;
+    }
     outstanding.delete(data.id);clearTimeout(entry.timer);entry.resolve(reply);
    },
    ()=>{
@@ -87,6 +99,12 @@ export function createOwnedActorWorker({
  const request=async(message)=>{
   if(closed)throw Error("actor closed");
   if(!ready)throw Error("actor not ready");
+  // Reference Worker supports Compute requests only. Fail before consuming an
+  // ID, allocating a deadline or sending an unadmitted variant to the Worker.
+  const variant=message!==null&&typeof message==="object"
+   ?Object.getOwnPropertyDescriptor(message,"variant"):undefined;
+  if(!variant||!Object.hasOwn(variant,"value")||variant.value!=="Compute")
+   throw Error("unadmitted actor Worker request variant");
   if(outstanding.size>=maxPending)throw Error("actor Worker pending limit exceeded");
   if(nextId>Number.MAX_SAFE_INTEGER)throw Error("actor request ID exhausted");
   const id=nextId++;
@@ -97,7 +115,10 @@ export function createOwnedActorWorker({
   // posted it and before request() returns it. Observe it immediately to
   // avoid a transient unhandled rejection; callers still receive rejection.
   result.catch(()=>{});
-  const entry={resolve,reject,timer:undefined};
+  // The deadline covers encoding, FIFO admission and the Worker response.
+  // A blocked WebCrypto digest must not keep a reserved slot forever.
+  const entry={resolve,reject,timer:setTimeout(
+   ()=>cancelAll(new Error("actor Worker deadline exceeded")),timeoutMs)};
   outstanding.set(id,entry);
   // Serialize immediately so a caller mutation after request() cannot
   // change payload bytes. Then preserve admission order across asynchronous
@@ -107,16 +128,27 @@ export function createOwnedActorWorker({
   const posted=transmit.then(async()=>{
    const bytes=await encoded;
    if(closed)throw Error("actor closed");
-   entry.timer=setTimeout(()=>cancelAll(new Error("actor Worker deadline exceeded")),timeoutMs);
+   // Mark as published before postMessage: a synchronous test shim may send
+   // its response reentrantly while postMessage is still on the stack.
+   entry.sent=true;
    // No transfer list: ownership is copied across the isolated Worker.
-   worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
+   try{
+    worker.postMessage({kind:"oreslang-owned-actor-request-v1",id,bytes,maxBytes});
+   }catch{
+    // A throwing Worker adapter could have delivered bytes before throwing.
+    // The physical admission outcome is unknown, so do not reuse its lane.
+    cancelAll(new Error("actor Worker publication uncertain"));
+   }
   });
   transmit=posted.catch(()=>{});
-  try{await posted;}catch(error){
+  // Return the reserved result immediately: waiting on posted would defeat
+  // the admission deadline if async hashing or queued admission stalls.
+  posted.catch(error=>{
+   if(closed)return; // cancelAll already rejected every reserved promise.
    clearTimeout(entry.timer);
    outstanding.delete(id);
-   reject(error);
-  }
+   entry.reject(error);
+  });
   return result;
  };
  return new Promise((resolve,reject)=>{

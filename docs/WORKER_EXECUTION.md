@@ -23,6 +23,8 @@ const value = await runVerifiedCoreGuestInWorker({wasmBytes,manifest,timeoutMs:2
 // value is a BigInt from the verified scalar guest
 ```
 
+The opt-in `npm run test:browser` runner launches **real Chromium and Firefox** via a pinned Playwright package. It hosts the exact browser modules over a local HTTP origin and creates actual dedicated module Workers through the default `workerFactory`; the tests check independent concurrent Workers, byte/hash/provenance rejection, entry ABI and memory policy, snapshot protection against caller mutation, CPU-bound Worker timeout, main-thread responsiveness, and fresh Worker recovery. Run `npx playwright install --with-deps chromium firefox` after installing the pinned `playwright@1.56.1` CI dependency. See `.github/workflows/real-browsers.yml` for GitHub Actions. **Do not treat an installed dependency as a passed test; inspect both engine outcomes and the final SHA-exact source tree.**
+
 Node 22 tests use an isolated worker_threads shim to execute the **unchanged** Worker entry and verify real WebAssembly execution, cancellation deadline and invalid-artifact rejection. This is executed Node Worker evidence, **not** yet real browser-engine E2E evidence.
 
 ## Next release gate

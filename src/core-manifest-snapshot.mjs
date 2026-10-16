@@ -1,0 +1,50 @@
+/** Capture only bounded JSON-like manifest values before any async Wasm work.
+ * Never call JSON.stringify on an unbounded caller-owned object: a huge
+ * nested tree, getters or toJSON hooks can run arbitrary code or exhaust
+ * memory before admission. This snapshot accepts data descriptors only.
+ */
+export function snapshotCoreManifest(original) {
+  const invalid=()=>{throw new Error('invalid browser core Wasm manifest serialization')};
+  const seen=new WeakSet();
+  let nodes=0,textUnits=0;
+  const walk=(value,depth)=>{
+    if(++nodes>128||depth>5)invalid();
+    if(typeof value==='string'){
+      textUnits+=value.length;
+      if(textUnits>4096)invalid();
+      return value;
+    }
+    if(value===null||typeof value==='boolean')return value;
+    if(typeof value==='number'&&Number.isFinite(value))return value;
+    if(typeof value!=='object'||seen.has(value))invalid();
+    seen.add(value);
+    const proto=Object.getPrototypeOf(value);
+    const isArray=Array.isArray(value);
+    if(isArray){
+      if(proto!==Array.prototype||value.length>32)invalid();
+      const keys=Reflect.ownKeys(value);
+      if(keys.length!==value.length+1)invalid();
+      const copy=[];
+      for(let i=0;i<value.length;i++){
+        const entry=Object.getOwnPropertyDescriptor(value,String(i));
+        if(!entry||!Object.hasOwn(entry,'value'))invalid();
+        copy.push(walk(entry.value,depth+1));
+      }
+      return Object.freeze(copy);
+    }
+    if(proto!==Object.prototype&&proto!==null)invalid();
+    const keys=Reflect.ownKeys(value);
+    if(keys.length>32)invalid();
+    const copy=Object.create(null);
+    for(const key of keys){
+      if(typeof key!=='string'||key.length>128)invalid();
+      textUnits+=key.length;
+      if(textUnits>4096)invalid();
+      const entry=Object.getOwnPropertyDescriptor(value,key);
+      if(!entry||!Object.hasOwn(entry,'value'))invalid();
+      copy[key]=walk(entry.value,depth+1);
+    }
+    return Object.freeze(copy);
+  };
+  return walk(original,0);
+}
