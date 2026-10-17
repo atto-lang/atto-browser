@@ -19,11 +19,17 @@ const ownedBytes=value=>{
 function scrub(value){
  try{ownedBytes(value)?.fill(0)}catch{}
 }
+// Detach ownership before invoking guest teardown so a teardown trap can
+// never cause panic/stop re-entry to execute teardown twice.
+function retireGuest(){
+ const retiring=guest;
+ guest=null;
+ retiring?.oreslang_wasm_actor_teardown();
+}
 function panic(){
  if(phase==="STOPPED"||phase==="PANICKED")return;
  phase="PANICKED";
- try{guest?.oreslang_wasm_actor_teardown()}catch{}
- guest=null;
+ try{retireGuest()}catch{}
  self.postMessage({kind:"oreslang-v2-panic"});
 }
 async function load(data){
@@ -66,8 +72,10 @@ async function load(data){
   // This must precede guest init(), not follow it: initialization is itself
   // guest execution and must be excluded after a terminal panic.
   if(phase!=="LOADING")throw Error("INIT cancelled before guest entry");
-  instance.exports.oreslang_wasm_actor_init();
+  // Take ownership before init. If init traps after partially mutating guest
+  // state, panic() must still run teardown exactly once.
   guest=instance.exports;
+  guest.oreslang_wasm_actor_init();
   contract={schemaId:data.schemaId,descriptor:"I"};
   phase="ACTIVE";
   self.postMessage({kind:"oreslang-v2-ready"});
@@ -75,9 +83,9 @@ async function load(data){
 }
 function stop(){
  if(phase!=="ACTIVE"||handling)return;
- try{guest.oreslang_wasm_actor_teardown()}
+ try{retireGuest()}
  catch{panic();return}
- guest=null;phase="STOPPED";
+ phase="STOPPED";
  self.postMessage({kind:"oreslang-v2-stopped"});
 }
 self.addEventListener("message",async event=>{
