@@ -31,7 +31,7 @@ async function endpoint(label,block,opts={}){
  const realWasm=globalThis.WebAssembly;
  const received=[];
  let dispatch;
- const spy={init:0,compile:0};
+ const spy={init:0,teardown:0,compile:0};
  try{
   Object.defineProperty(globalThis,"self",{configurable:true,value:{
    addEventListener(kind,callback){if(kind==="message")dispatch=callback},
@@ -42,7 +42,13 @@ async function endpoint(label,block,opts={}){
    const real=new realWasm.Instance(module);
    return {exports:{...real.exports,
     oreslang_wasm_actor_init(...args){
-     spy.init++;return real.exports.oreslang_wasm_actor_init(...args)
+     spy.init++;
+     if(opts.initTrap)throw Error("synthetic init trap");
+     return real.exports.oreslang_wasm_actor_init(...args)
+    },
+    oreslang_wasm_actor_teardown(...args){
+     spy.teardown++;
+     return real.exports.oreslang_wasm_actor_teardown(...args)
     }}};
   };
   patched.compile=(...args)=>{
@@ -117,3 +123,13 @@ test("terminal panic during asynchronous Wasm compilation forbids guest init",as
   compileEntered();
  })});
 });
+
+test("guest init trap tears down partial actor exactly once",async()=>{
+ await endpoint("init-trap",async({init,received,spy})=>{
+  await init();
+  assert.deepEqual(received,[{kind:"oreslang-v2-panic"}]);
+  assert.equal(spy.init,1);
+  assert.equal(spy.teardown,1,"partial guest must be retired exactly once");
+ },{initTrap:true});
+});
+
