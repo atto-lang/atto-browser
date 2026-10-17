@@ -48,6 +48,7 @@ async function endpoint(label,block,opts={}){
     },
     oreslang_wasm_actor_teardown(...args){
      spy.teardown++;
+     if(opts.teardownTrap)throw Error("synthetic teardown trap");
      return real.exports.oreslang_wasm_actor_teardown(...args)
     }}};
   };
@@ -133,3 +134,19 @@ test("guest init trap tears down partial actor exactly once",async()=>{
  },{initTrap:true});
 });
 
+
+
+test("teardown trap on drain still retires guest exactly once",async()=>{
+ await endpoint("teardown-trap",async({dispatch,init,received,spy})=>{
+  await init();
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"}]);
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.deepEqual(received,[
+   {kind:"oreslang-v2-ready"},
+   {kind:"oreslang-v2-panic"}
+  ]);
+  assert.equal(spy.teardown,1,"teardown trap must not trigger a second teardown");
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.equal(spy.teardown,1,"terminal endpoint must keep teardown absorbing");
+ },{teardownTrap:true});
+});
