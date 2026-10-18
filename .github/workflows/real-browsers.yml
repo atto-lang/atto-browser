@@ -18,7 +18,7 @@ jobs:
       - name: Record exact checked-out revision (not a passed-suite receipt)
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          printf 'CHECKOUT_SHA=%s\\nNODE_VERSION=%s\\n' "$GITHUB_SHA" "$(node --version)"
+          printf 'CHECKOUT_SHA=%s\nNODE_VERSION=%s\n' "$GITHUB_SHA" "$(node --version)"
       - name: Verify Node unit and isolated-worker regressions
         run: npm test
       - name: Install pinned Playwright harness
