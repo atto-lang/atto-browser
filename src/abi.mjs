@@ -18,7 +18,9 @@ export function assertCoreI64Entry(bytes,entry) {
   };
   const typeSignatures=[],functionTypes=[];
   let exportedTypeIndex;
-  const decoder=new TextDecoder("utf-8",{fatal:true});
+  // Wasm export names are identifiers: a leading U+FEFF is part of the
+  // name and must not be stripped as a text-file byte-order marker.
+  const decoder=new TextDecoder("utf-8",{fatal:true,ignoreBOM:true});
   while(at<bytes.length){
     const id=bytes[at++],length=u32(bytes.length),end=at+length;
     if(end>bytes.length)throw Error("truncated Wasm ABI section");
