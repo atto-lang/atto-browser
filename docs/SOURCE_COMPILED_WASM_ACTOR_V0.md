@@ -68,3 +68,19 @@ a browser Worker must be treated as the sole execution owner of its guest
 instance. The host must enforce its own deadline and cancellation to avoid
 untrusted code monopolizing that Worker. Full lifecycle and CONTROL-plane
 verification remains a separate release gate.
+
+## Terminal cleanup / exact-once teardown
+
+The browser Worker owns its compiled guest instance exclusively. Retirement
+**takes** and clears that reference before invoking the compiler-generated
+`oreslang_wasm_actor_teardown()` export. A successful drain emits STOPPED
+only after teardown returns; a teardown trap emits exactly one terminal
+supervisor panic and **must not retry** the destructor. Malformed DATA or
+unexpected guest traps likewise consume the guest reference once, even if its
+teardown also traps. Later CONTROL and DATA messages cannot resurrect the
+actor or execute its cleanup again.
+
+This guarantees at-most-once *attempt* at guest teardown per instance in this
+experimental Worker. It does not guarantee cleanup succeeds after a Wasm trap,
+reclamation of arbitrary external resources, or full source-level actor
+`tear_down()` semantics. Those are separate native/OresVM release gates.

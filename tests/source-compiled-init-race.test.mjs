@@ -31,7 +31,7 @@ async function endpoint(label,block,opts={}){
  const realWasm=globalThis.WebAssembly;
  const received=[];
  let dispatch;
- const spy={init:0,compile:0};
+ const spy={init:0,compile:0,teardown:0,messages:0};
  try{
   Object.defineProperty(globalThis,"self",{configurable:true,value:{
    addEventListener(kind,callback){if(kind==="message")dispatch=callback},
@@ -43,6 +43,14 @@ async function endpoint(label,block,opts={}){
    return {exports:{...real.exports,
     oreslang_wasm_actor_init(...args){
      spy.init++;return real.exports.oreslang_wasm_actor_init(...args)
+    },
+    oreslang_wasm_actor_on_message(...args){
+     spy.messages++;return real.exports.oreslang_wasm_actor_on_message(...args)
+    },
+    oreslang_wasm_actor_teardown(...args){
+     spy.teardown++;
+     if(opts.trapTeardown)throw Error("simulated guest teardown trap");
+     return real.exports.oreslang_wasm_actor_teardown(...args)
     }}};
   };
   patched.compile=(...args)=>{
@@ -76,6 +84,8 @@ test("source-compiled actor executes real import-free guest ABI and drains",asyn
   await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
   assert.deepEqual(received.at(-1),{kind:"oreslang-v2-stopped"});
   assert.equal(spy.init,1);
+  assert.equal(spy.messages,1,"one source DATA invokes the guest once");
+  assert.equal(spy.teardown,1,"successful drain destroys guest once");
  });
 });
 
@@ -116,4 +126,94 @@ test("terminal panic during asynchronous Wasm compilation forbids guest init",as
   release=()=>realCompile(bytes).then(resolve,reject);
   compileEntered();
  })});
+});
+
+test("guest teardown trap during CONTROL drain reports panic without retry",async()=>{
+ await endpoint("teardown-trap-drain",async({dispatch,init,received,spy})=>{
+  await init();
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"}]);
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}],
+   "drain teardown trap must report one terminal supervisor panic");
+  assert.equal(spy.teardown,1,
+   "a throwing teardown must never be invoked again by panic()");
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.equal(spy.teardown,1,"post-panic CONTROL never repeats teardown");
+  assert.equal(received.length,2,"no additional terminal or stopped receipt");
+ },{trapTeardown:true});
+});
+
+test("malformed DATA terminal panic performs exactly one trapping teardown",async()=>{
+ await endpoint("teardown-trap-panic",async({dispatch,init,received,spy})=>{
+  await init();
+  const bad=Uint8Array.of(1,2,3);
+  await dispatch({data:{kind:"oreslang-v2-data",id:1,frame:bad}});
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}]);
+  assert.equal(spy.teardown,1,"terminal panic tears down at most once");
+  assert.ok(bad.every(x=>x===0),"bad DATA frame is scrubbed");
+  await dispatch({data:{kind:"oreslang-v2-data",id:2,frame:Uint8Array.of(9)}});
+  assert.equal(spy.teardown,1);
+ },{trapTeardown:true});
+});
+
+test("terminal panic while DATA SHA is suspended forbids later guest execution",async()=>{
+ const sourceFrame=await encodeActorMessageV2({schemaId,descriptor,value:11n});
+ let calls=0,entered,release;
+ const suspended=new Promise(resolve=>entered=resolve);
+ await endpoint("data-sha-panic",async({dispatch,init,received,spy})=>{
+  await init();
+  const original=Uint8Array.from(sourceFrame);
+  const pending=dispatch({data:{kind:"oreslang-v2-data",id:1,frame:original}});
+  await suspended;
+  // A concurrent DATA ticket is an actor protocol violation, and must
+  // terminally panic before either suspended message invokes guest code.
+  const conflicting=Uint8Array.from(sourceFrame);
+  await dispatch({data:{kind:"oreslang-v2-data",id:2,frame:conflicting}});
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}]);
+  assert.equal(spy.messages,0);
+  assert.equal(spy.teardown,1,"panic releases guest exactly once");
+  assert.ok(conflicting.every(byte=>byte===0),"conflicting DATA clone scrubbed");
+  release();
+  await pending;
+  assert.equal(spy.messages,0,"late decoded message must not reach guest");
+  assert.ok(original.every(byte=>byte===0),"cancelled DATA clone scrubbed");
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"},{kind:"oreslang-v2-panic"}]);
+ },{digest:(algorithm,bytes)=>{
+  if(++calls===1)return webcrypto.subtle.digest(algorithm,bytes);
+  return new Promise((resolve,reject)=>{
+   release=()=>webcrypto.subtle.digest(algorithm,bytes).then(resolve,reject);
+   entered();
+  });
+ }});
+});
+
+test("drain during DATA SHA awaits one guest turn then tears down exactly once",async()=>{
+ const sourceFrame=await encodeActorMessageV2({schemaId,descriptor,value:12n});
+ let calls=0,entered,release;
+ const suspended=new Promise(resolve=>entered=resolve);
+ await endpoint("data-sha-drain",async({dispatch,init,received,spy})=>{
+  await init();
+  const original=Uint8Array.from(sourceFrame);
+  const pending=dispatch({data:{kind:"oreslang-v2-data",id:1,frame:original}});
+  await suspended;
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"}],
+   "drain may not report STOPPED before the in-flight turn");
+  release();
+  await pending;
+  assert.deepEqual(received,[
+   {kind:"oreslang-v2-ready"},
+   {kind:"oreslang-v2-receipt",id:1,ok:true,result:12n},
+   {kind:"oreslang-v2-stopped"}
+  ]);
+  assert.equal(spy.messages,1,"in-flight guest executed once");
+  assert.equal(spy.teardown,1,"graceful CONTROL drains one guest lifetime");
+  assert.ok(original.every(byte=>byte===0),"drained DATA frame scrubbed");
+ },{digest:(algorithm,bytes)=>{
+  if(++calls===1)return webcrypto.subtle.digest(algorithm,bytes);
+  return new Promise((resolve,reject)=>{
+   release=()=>webcrypto.subtle.digest(algorithm,bytes).then(resolve,reject);
+   entered();
+  });
+ }});
 });
