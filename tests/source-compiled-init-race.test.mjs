@@ -42,14 +42,16 @@ async function endpoint(label,block,opts={}){
    const real=new realWasm.Instance(module);
    return {exports:{...real.exports,
     oreslang_wasm_actor_init(...args){
-     spy.init++;return real.exports.oreslang_wasm_actor_init(...args)
+     spy.init++;
+     if(opts.initTrap)throw Error("synthetic init trap");
+     return real.exports.oreslang_wasm_actor_init(...args)
     },
     oreslang_wasm_actor_on_message(...args){
      spy.messages++;return real.exports.oreslang_wasm_actor_on_message(...args)
     },
     oreslang_wasm_actor_teardown(...args){
      spy.teardown++;
-     if(opts.trapTeardown)throw Error("simulated guest teardown trap");
+     if(opts.trapTeardown || opts.teardownTrap)throw Error("simulated guest teardown trap");
      return real.exports.oreslang_wasm_actor_teardown(...args)
     }}};
   };
@@ -216,4 +218,30 @@ test("drain during DATA SHA awaits one guest turn then tears down exactly once",
    entered();
   });
  }});
+});
+
+test("guest init trap tears down partial actor exactly once",async()=>{
+ await endpoint("init-trap",async({init,received,spy})=>{
+  await init();
+  assert.deepEqual(received,[{kind:"oreslang-v2-panic"}]);
+  assert.equal(spy.init,1);
+  assert.equal(spy.teardown,1,"partial guest must be retired exactly once");
+ },{initTrap:true});
+});
+
+
+
+test("teardown trap on drain still retires guest exactly once",async()=>{
+ await endpoint("teardown-trap",async({dispatch,init,received,spy})=>{
+  await init();
+  assert.deepEqual(received,[{kind:"oreslang-v2-ready"}]);
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.deepEqual(received,[
+   {kind:"oreslang-v2-ready"},
+   {kind:"oreslang-v2-panic"}
+  ]);
+  assert.equal(spy.teardown,1,"teardown trap must not trigger a second teardown");
+  await dispatch({data:{kind:"oreslang-v2-control",action:"drain"}});
+  assert.equal(spy.teardown,1,"terminal endpoint must keep teardown absorbing");
+ },{teardownTrap:true});
 });

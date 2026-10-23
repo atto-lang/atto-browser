@@ -72,8 +72,9 @@ async function load(data){
   // This must precede guest init(), not follow it: initialization is itself
   // guest execution and must be excluded after a terminal panic.
   if(phase!=="LOADING")throw Error("INIT cancelled before guest entry");
-  instance.exports.oreslang_wasm_actor_init();
+  // Own the partial guest before init so a trap retires it exactly once.
   guest=instance.exports;
+  guest.oreslang_wasm_actor_init();
   contract={schemaId:data.schemaId,descriptor:"I"};
   phase="ACTIVE";
   self.postMessage({kind:"oreslang-v2-ready"});
