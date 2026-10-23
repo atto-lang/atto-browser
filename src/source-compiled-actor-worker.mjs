@@ -19,8 +19,8 @@ const ownedBytes=value=>{
 function scrub(value){
  try{ownedBytes(value)?.fill(0)}catch{}
 }
-// Take ownership of the guest before invoking untrusted/destructing Wasm.
-// A teardown trap must never cause supervisor panic to invoke teardown twice.
+// Detach ownership before invoking guest teardown so a teardown trap can
+// never cause panic/stop re-entry to execute teardown twice.
 function retireGuest(){
  const retiring=guest;
  guest=null;
@@ -72,7 +72,8 @@ async function load(data){
   // This must precede guest init(), not follow it: initialization is itself
   // guest execution and must be excluded after a terminal panic.
   if(phase!=="LOADING")throw Error("INIT cancelled before guest entry");
-  // Own the partial guest before init so a trap retires it exactly once.
+  // Take ownership before init. If init traps after partially mutating guest
+  // state, panic() must still run teardown exactly once.
   guest=instance.exports;
   guest.oreslang_wasm_actor_init();
   contract={schemaId:data.schemaId,descriptor:"I"};
