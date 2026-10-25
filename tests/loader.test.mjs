@@ -80,3 +80,26 @@ test("clock provider cannot smuggle negative or nonfinite time into Wasm",async(
   assert.equal(rt.hostClockCalls,0);
  }
 });
+
+test("Wasm admission uses intrinsic view slots without executing shadow getters",()=>{
+ for(const input of [bytes.slice(),new DataView(bytes.slice().buffer)]){
+  let accesses=0;
+  for(const key of ["buffer","byteOffset","byteLength"])
+   Object.defineProperty(input,key,{get(){accesses++;throw Error("shadow getter");}});
+  assert.equal(inspectWasmBytes(input).bytes.length,bytes.length);
+  assert.equal(accesses,0);
+ }
+});
+test("shared view cannot conceal backing storage behind an own buffer property",()=>{
+ const input=new Uint8Array(new SharedArrayBuffer(bytes.length));input.set(bytes);
+ Object.defineProperty(input,"buffer",{value:bytes.buffer});
+ assert.throws(()=>inspectWasmBytes(input),/shared Wasm input memory/);
+});
+
+test("foreign-realm shared Wasm views cannot bypass backing-store admission",async()=>{
+ const {runInNewContext}=await import("node:vm");
+ const foreign=runInNewContext("new Uint8Array(new SharedArrayBuffer(8))");
+ foreign.set([0,97,115,109,1,0,0,0]);
+ assert.equal(foreign.buffer instanceof SharedArrayBuffer,false);
+ assert.throws(()=>inspectWasmBytes(foreign),/shared Wasm input memory/);
+});
