@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {loadVerifiedCoreGuest} from "../src/artifact.mjs";
+import {snapshotCoreManifest} from "../src/core-manifest-snapshot.mjs";
 
 const section=(id,data)=>[id,data.length,...data];
 const name=s=>[s.length,...new TextEncoder().encode(s)];
@@ -41,4 +42,41 @@ test("non-JSON and cyclic manifests fail closed before guest execution",async()=
  const cycle=manifest();cycle.self=cycle;
  await assert.rejects(loadVerifiedCoreGuest(wasm,cycle),/serialization/);
  await assert.rejects(loadVerifiedCoreGuest(wasm,{...manifest(),wasmSha256:1n}),/serialization/);
+});
+
+test("manifest snapshot refuses accessor, hook, inherited and symbol authority without running getters", () => {
+ const accessored=manifest();
+ let getterCalls=0;
+ Object.defineProperty(accessored.producer,"compilerSha256",{
+  enumerable:true,configurable:true,get(){getterCalls++;return h;}
+ });
+ assert.throws(()=>snapshotCoreManifest(accessored),/serialization/);
+ assert.equal(getterCalls,0,"manifest reader must not invoke guest getters");
+
+ const hooked=manifest();
+ let hookCalls=0;
+ Object.defineProperty(hooked,"toJSON",{value(){hookCalls++;return manifest();}});
+ assert.throws(()=>snapshotCoreManifest(hooked),/serialization/);
+ assert.equal(hookCalls,0,"never execute user-defined toJSON during admission");
+
+ const inherited=manifest();
+ inherited.memory=Object.create({maximumPages:2});
+ assert.throws(()=>snapshotCoreManifest(inherited),/serialization/);
+
+ const symbolic=manifest();
+ Object.defineProperty(symbolic,Symbol("grant"),{value:"filesystem"});
+ assert.throws(()=>snapshotCoreManifest(symbolic),/serialization/);
+});
+
+test("manifest snapshot makes nested plain data immutable before caller mutation", () => {
+ const m=manifest();
+ const snapshot=snapshotCoreManifest(m);
+ m.memory.maximumPages=100;
+ m.requiredCapabilities.push("network");
+ m.producer.compilerSha256="0".repeat(64);
+ assert.equal(snapshot.memory.maximumPages,2);
+ assert.deepEqual(snapshot.requiredCapabilities,[]);
+ assert.equal(snapshot.producer.compilerSha256,h);
+ assert.equal(Object.isFrozen(snapshot.memory),true);
+ assert.equal(Object.isFrozen(snapshot.requiredCapabilities),true);
 });
