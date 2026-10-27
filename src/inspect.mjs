@@ -18,7 +18,9 @@ export function inspectWasmBytes(input,{maxModuleBytes=1048576,maxMemoryPages=32
  if(!Number.isSafeInteger(maxMemoryPages)||maxMemoryPages<1||maxMemoryPages>256)throw new TypeError("invalid maximum memory pages");
  if(input instanceof WebAssembly.Module)throw new TypeError("precompiled WebAssembly.Module cannot be inspected: provide original bytes");
  let bytes;
- if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
+ // Trust the intrinsic ArrayBuffer slot, never a spoofable prototype chain.
+ // A SharedArrayBuffer can have its prototype replaced with ArrayBuffer.prototype.
+ if(isOrdinaryBuffer(input))bytes=new Uint8Array(input);
  else if(ArrayBuffer.isView(input)){
   // A concurrently writable SharedArrayBuffer can race input admission.
   // Only caller-owned, non-shared bytes may be snapshotted for verification.
