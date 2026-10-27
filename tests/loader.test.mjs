@@ -103,3 +103,20 @@ test("foreign-realm shared Wasm views cannot bypass backing-store admission",asy
  assert.equal(foreign.buffer instanceof SharedArrayBuffer,false);
  assert.throws(()=>inspectWasmBytes(foreign),/shared Wasm input memory/);
 });
+
+test("prototype-spoofed SharedArrayBuffer cannot bypass ordinary-memory admission", async () => {
+  if(typeof SharedArrayBuffer === "undefined")return;
+  const buffer = new SharedArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  Object.setPrototypeOf(buffer, ArrayBuffer.prototype);
+  assert.equal(buffer instanceof ArrayBuffer, true);
+  assert.throws(() => inspectWasmBytes(buffer), /expected a Wasm ArrayBuffer/);
+  await assert.rejects(() => loadOreslangWasm(buffer,config), /expected a Wasm ArrayBuffer/);
+  assert.equal(inspectWasmBytes(bytes.slice().buffer).memoryCount, 1);
+});
+
+test("forged ArrayBuffer prototype without native byte storage is never accepted", () => {
+  const forged=Object.create(ArrayBuffer.prototype);
+  assert.equal(forged instanceof ArrayBuffer,true);
+  assert.throws(() => inspectWasmBytes(forged), /expected a Wasm ArrayBuffer/);
+});
