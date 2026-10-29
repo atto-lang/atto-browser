@@ -92,7 +92,7 @@ current status.
   scoped fetch, staged activation, bounded wake/push admission.
 - `src/workers/lifecycle.ores`: service-worker registration actor
   demonstration, including waiting updates and idle restarts.
-- Native guest manifest now has **eleven** Oreslang sources, gated by
+- Native guest manifest now has **twelve** Oreslang sources, gated by
   a compiler SHA pin. Compilation and real execution remain unverified.
 
 The desktop implementation will be a **native app, not Electron or
@@ -100,6 +100,25 @@ an embedded WebView**. OS-only platform adapters may be written in
 Rust/C++ while all browser control-plane behavior stays in Oreslang.
 See [desktop architecture and security gates](docs/DESKTOP_APP.md).
 An actual platform window or website renderer is **not yet implemented**.
+
+## BrowserSupervisor native actor-control slice (not yet linked to FFI)
+
+`src/browser/browser_supervisor.ores` now defines an Oreslang
+`BrowserSupervisorActor` with a single actor-owned `state` schema
+and critical `handle_state` mutations. The fixture exercises two independent
+tab IDs, create/select/close, stale-ID refusal, non-recycled IDs, monotonic
+revisions and separate actor-instance state. The **two-slot** implementation
+is deliberately a compiler acceptance slice; the desktop target is 64 tabs.
+Its integer fixture messages are NOT an authenticated protocol or the
+Qt-facing C ABI.
+
+The other five stateful browser, window, tab, renderer and worker lifecycle
+fixtures have also been migrated away from ad-hoc instance-field writes.
+Source-shape checks now reject direct actor-field access and require one
+state schema in each actor. The manifest tracks twelve actual guest programs.
+Native Oreslang compilation/execution is still **NOT_EXECUTED**; the
+current LLVM exporter does not yet supply the five linked browser symbols.
+See [Milestone 1 evidence and next gates](docs/MILESTONE1.md).
 
 ## Next milestones
 
