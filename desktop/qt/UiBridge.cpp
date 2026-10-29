@@ -4,6 +4,7 @@
 #include <QMetaObject>
 #include <QVariantMap>
 #include <QByteArray>
+#include <QSet>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -14,9 +15,15 @@ bool checkedUtf8(const char (&bytes)[N], QString &target) {
     size_t count = 0;
     while (count < N && bytes[count] != '\0') ++count;
     if (count == N) return false;
-    target = QString::fromUtf8(bytes, static_cast<qsizetype>(count));
-    // Treat invalid UTF-8 from a buggy backend as a protocol error.
-    return !target.contains(QChar::ReplacementCharacter);
+    // Fixed-width ABI strings must have canonical zero-padding.
+    for (size_t i = count + 1; i < N; ++i) {
+        if (bytes[i] != '\0') return false;
+    }
+    const QByteArray original(bytes, static_cast<int>(count));
+    target = QString::fromUtf8(original.constData(),
+                               static_cast<qsizetype>(original.size()));
+    // Roundtrip rejects malformed UTF-8 but accepts valid U+FFFD.
+    return target.toUtf8() == original;
 }
 bool validStatus(int32_t status) {
     return status >= ORES_BROWSER_OK && status <= ORES_BROWSER_INTERNAL;
@@ -103,7 +110,7 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     if (op == ORES_BROWSER_CMD_NAVIGATE) {
         const QByteArray value = url.toUtf8();
         if (value.isEmpty() || value.size() >= ORES_BROWSER_URL_BYTES ||
-            value.contains('\0')) {
+            value.contains('\0') || QString::fromUtf8(value) != url) {
             emit rejected(QStringLiteral("Invalid address length or encoding"));
             return;
         }
@@ -141,12 +148,17 @@ void BackendWorker::readSnapshot() {
     QString activeId, activeGeneration, activeUrl;
     bool canBack = false, canForward = false;
     uint32_t activeCount = 0;
+    QSet<quint64> seenTabIds;
     for (uint32_t i = 0; i < view->tab_count; ++i) {
         const auto &t = view->tabs[i];
         if (!t.tab_id || !t.generation || t.active > 1 ||
             t.can_go_back > 1 || t.can_go_forward > 1 || t.loading > 1) {
             failClosed(QStringLiteral("Malformed tab record")); return;
         }
+        if (seenTabIds.contains(t.tab_id)) {
+            failClosed(QStringLiteral("Duplicate live tab identity")); return;
+        }
+        seenTabIds.insert(t.tab_id);
         QString title, displayUrl;
         if (!checkedUtf8(t.title, title) ||
             !checkedUtf8(t.display_url, displayUrl)) {
