@@ -10,7 +10,7 @@ Status: **PARTIAL IMPLEMENTATION; NOT COMPILED, NOT CONNECTED TO QT**.
 - `src/desktop/window_tab_strip.ores`: presentation selection and count in one actor state schema. Its indices are NOT FFI tab IDs.
 - `src/desktop/tab_session.ores`: per-tab history counters in a critical actor transaction. URL/history list and snapshots not built.
 - `src/workers/lifecycle.ores`: worker staging/activation state in a critical actor transaction. No real JS worker.
-- `ci/native-cases.txt` and `ci/verify-native.sh`: **twelve** source/expected-output pairs. `ci/check-source.sh` performs structural state-presence and direct-field-access checks.
+- `ci/native-cases.txt` and `ci/verify-native.sh`: **fourteen** source/expected-output pairs. `ci/check-source.sh` performs structural state-presence and direct-field-access checks.
 
 ## Boundary truth
 
@@ -78,3 +78,20 @@ enforcement based on source spelling.
 
 Release gate: **keep PR #1 in draft** until all source/build/security tests
 have real executed evidence rather than zero-step runner failures.
+
+## Follow-on: multi-renderer tabs / frame registry slice
+
+The new `src/browser/frame_routing_policy.ores` and
+`tests/guest/frame_routing_policy.ores` define 45 positive/negative
+frame routing policy vectors. The new
+`src/browser/window_frame_graph.ores` sealed-state actor
+is a two-tab, three-frame, two-renderer fixture showing cross-site OOPIF
+assignment, renderer reuse across tabs, atomic same-site navigation
+rebinding, stale surface fencing, derived renderer reference counts,
+subtree close and independent window actor state. These local integer
+commands do NOT constitute a general-purpose dynamic frame tree.
+
+See [MULTI_RENDERER_TABS.md](MULTI_RENDERER_TABS.md). Native compilation,
+real OOPIF OS processes, renderer IsolateVM, IPC and compositor remain
+unverified/unimplemented. Total manifest count is **14**; a zero-step
+CI run must not be called a passed test.

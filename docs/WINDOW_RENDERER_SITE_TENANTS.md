@@ -127,6 +127,18 @@ site content or renderer replies.
   partition, stale generation, unverified PSL, unsandboxed renderer,
   untrusted hosting, and sibling-origin resource access cases.
 
+## Multiple renderers per tab
+
+One tab's frame tree may refer to multiple sandboxed renderer processes
+via cross-site OOPIFs; a renderer may serve compatible frames of
+multiple tabs. This is a many-to-many relation managed by the window
+frame registry, **not** by a single TabActor or renderer actor.
+Frame/document generation, exact target origin, site/process lock,
+agent-cluster compatibility, compositor surface tickets and cross-process
+postMessage are separate checks. See [MULTI_RENDERER_TABS.md](MULTI_RENDERER_TABS.md).
+The new Oreslang policy and bounded frame graph fixture are not physical
+OS processes or working page rendering.
+
 ## Release / parity gates
 
 1. Implement canonical site/origin/PSL resolver with at least a current

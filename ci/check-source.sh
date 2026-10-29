@@ -3,15 +3,18 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f ci/native-cases.txt ]
-[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 12 ]
+[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 14 ]
 for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
-    src/browser/renderer_supervisor.ores src/browser/browser_supervisor.ores src/browser/tab_epoch.ores \
+    src/browser/renderer_supervisor.ores src/browser/browser_supervisor.ores \
+    src/browser/window_frame_graph.ores src/browser/frame_routing_policy.ores \
+    src/browser/tab_epoch.ores \
     src/desktop/tab_policy.ores src/desktop/ui_dispatch_policy.ores \
     src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores \
     src/notifications/notification_policy.ores \
     src/workers/service_worker_policy.ores src/workers/lifecycle.ores \
     tests/guest/isolation_policy.ores tests/guest/site_tenant_policy.ores \
+    tests/guest/frame_routing_policy.ores \
     tests/guest/tab_policy.ores \
     tests/guest/ui_dispatch_policy.ores \
     tests/guest/notification_policy.ores tests/guest/service_worker_policy.ores; do
@@ -36,11 +39,22 @@ for fn in may_place_site_renderer may_share_site_isolate \
     may_control_renderer may_access_origin_resource; do
   grep -Fq "pub fnc $fn(" src/isolation/site_tenant_policy.ores
 done
+for fn in may_bind_frame_to_renderer may_reuse_renderer_for_frames \
+    may_attach_child_frame may_commit_frame_navigation \
+    may_route_frame_message may_composite_frame_surface \
+    may_retire_unused_renderer; do
+  grep -Fq "pub fnc $fn(" src/browser/frame_routing_policy.ores
+done
+for term in cross-site-postmessage stale-target-document \
+    cross-tab-child stale-frame-surface inflight-surface-retirement; do
+  grep -Fq "FAIL:$term" tests/guest/frame_routing_policy.ores
+done
 grep -Fq 'define actor RendererSupervisorActor' src/browser/renderer_supervisor.ores
 grep -Fq 'FAIL:untrusted-hosted-subdomains' tests/guest/site_tenant_policy.ores
 grep -Fq 'FAIL:sibling-origin-read' tests/guest/site_tenant_policy.ores
 # These source checks are structural only; compilation is a separate gate.
 for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
+    src/browser/window_frame_graph.ores \
     src/browser/renderer_supervisor.ores src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores src/workers/lifecycle.ores; do
   [ "$(grep -Ec '^  state \{' "$actor")" -eq 1 ] || {
@@ -58,6 +72,8 @@ for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     exit 1
   fi
 done
+grep -Fq 'FAIL:stale-child-surface' src/browser/window_frame_graph.ores
+grep -Fq 'FAIL:cross-tab-damage' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:stale-tab-id' src/browser/browser_supervisor.ores
 grep -Fq 'FAIL:nonrecycled-tab-id' src/browser/browser_supervisor.ores
 grep -Fq 'define actor TabEpochActor' src/browser/tab_epoch.ores

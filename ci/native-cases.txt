@@ -10,3 +10,5 @@ tests/guest/ui_dispatch_policy.ores|browser:ui-ffi-policy-ok
 tests/guest/site_tenant_policy.ores|browser:site-tenant-policy-ok
 src/browser/renderer_supervisor.ores|browser:renderer-supervisor-ok
 src/browser/browser_supervisor.ores|browser:supervisor-tabs-ok
+tests/guest/frame_routing_policy.ores|browser:frame-routing-policy-ok
+src/browser/window_frame_graph.ores|browser:frame-graph-ok

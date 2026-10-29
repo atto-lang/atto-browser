@@ -1,0 +1,215 @@
+// FRAME / RENDERER ROUTING POLICY — pure Oreslang bootstrap.
+// A tab owns a frame tree, NOT a renderer. WindowSupervisor owns renderers.
+// Trusted browser brokers assign ALL IDs and booleans; renderer-provided
+// "sandbox_verified" or "site_verified" is never authoritative.
+// Physical OS process/surface/IsolateVM isolation is NOT implemented here.
+
+// A committed frame may join a renderer only if the broker has verified
+// the site lock, sandbox, window/profile/partition and process generation.
+// Distinct origins are allowed only as separate origin realms in the same
+// trusted site; the broker must still enforce exact-origin resource grants.
+pub fnc may_bind_frame_to_renderer(
+    int frame_window, int renderer_window,
+    int frame_profile, int renderer_profile,
+    int frame_partition, int renderer_partition,
+    int frame_site, int renderer_site,
+    int frame_id, int tab_id, int document_epoch,
+    int renderer_id, int presented_renderer_generation,
+    int live_renderer_generation,
+    bool site_verified, bool sandbox_verified, bool renderer_live,
+    bool compatible_agent_cluster, bool strong_origin_split_required): bool {
+  if frame_window <= 0 || renderer_window <= 0; do return false; fi
+  if frame_profile <= 0 || renderer_profile <= 0; do return false; fi
+  if frame_partition <= 0 || renderer_partition <= 0; do return false; fi
+  if frame_site <= 0 || renderer_site <= 0; do return false; fi
+  if frame_id <= 0 || tab_id <= 0 || document_epoch <= 0; do
+    return false;
+  fi
+  if renderer_id <= 0 || presented_renderer_generation <= 0 ||
+     live_renderer_generation <= 0; do return false; fi
+  if !site_verified || !sandbox_verified || !renderer_live ||
+     !compatible_agent_cluster || strong_origin_split_required; do
+    return false;
+  fi
+  return frame_window == renderer_window &&
+         frame_profile == renderer_profile &&
+         frame_partition == renderer_partition &&
+         frame_site == renderer_site &&
+         presented_renderer_generation == live_renderer_generation;
+}
+
+// Two frames, even in DIFFERENT tabs, may share one site renderer if
+// their process/site/partition/agent-cluster relationships are compatible.
+// This policy does not treat distinct origin IDs as an automatic denial
+// of process reuse; the exact-origin capability broker remains mandatory.
+pub fnc may_reuse_renderer_for_frames(
+    int first_window, int second_window,
+    int first_profile, int second_profile,
+    int first_partition, int second_partition,
+    int first_site, int second_site,
+    int first_renderer, int second_renderer,
+    int first_generation, int second_generation,
+    bool site_verified, bool sandbox_verified,
+    bool renderer_live, bool same_agent_cluster_policy,
+    bool isolation_split_required): bool {
+  if first_window <= 0 || second_window <= 0; do return false; fi
+  if first_profile <= 0 || second_profile <= 0; do return false; fi
+  if first_partition <= 0 || second_partition <= 0; do return false; fi
+  if first_site <= 0 || second_site <= 0; do return false; fi
+  if first_renderer <= 0 || second_renderer <= 0; do return false; fi
+  if first_generation <= 0 || second_generation <= 0; do
+    return false;
+  fi
+  if !site_verified || !sandbox_verified || !renderer_live ||
+     !same_agent_cluster_policy || isolation_split_required; do
+    return false;
+  fi
+  return first_window == second_window &&
+         first_profile == second_profile &&
+         first_partition == second_partition &&
+         first_site == second_site &&
+         first_renderer == second_renderer &&
+         first_generation == second_generation;
+}
+
+// Parent/child frame identities come from the window frame graph. Cross-site
+// parent/child may have DIFFERENT renderer IDs. Frame graph membership
+// does not confer cross-origin DOM access or direct IPC authority.
+pub fnc may_attach_child_frame(
+    int parent_window, int child_window,
+    int parent_tab, int child_tab,
+    int parent_frame, int child_frame,
+    int parent_document_epoch, int presented_parent_epoch,
+    bool parent_live, bool child_slot_unused,
+    bool browser_issued_child_ticket): bool {
+  if parent_window <= 0 || child_window <= 0; do return false; fi
+  if parent_tab <= 0 || child_tab <= 0; do return false; fi
+  if parent_frame <= 0 || child_frame <= 0; do return false; fi
+  if parent_document_epoch <= 0 || presented_parent_epoch <= 0; do
+    return false;
+  fi
+  if !parent_live || !child_slot_unused ||
+     !browser_issued_child_ticket; do return false; fi
+  return parent_window == child_window &&
+         parent_tab == child_tab &&
+         parent_frame != child_frame &&
+         parent_document_epoch == presented_parent_epoch;
+}
+
+// Navigation response may commit only to the still-current frame, and
+// an already-admitted target renderer generation. Process rebinding,
+// document epoch advancement, refcount updates and compositor invalidation
+// must occur in ONE registry transaction after this pure check.
+pub fnc may_commit_frame_navigation(
+    int token_window, int live_window,
+    int token_tab, int live_tab,
+    int token_frame, int live_frame,
+    int token_document_epoch, int pending_document_epoch,
+    int token_renderer, int target_renderer,
+    int token_renderer_generation, int live_renderer_generation,
+    bool navigation_pending, bool frame_live,
+    bool target_site_admitted, bool renderer_sandbox_verified): bool {
+  if token_window <= 0 || live_window <= 0; do return false; fi
+  if token_tab <= 0 || live_tab <= 0; do return false; fi
+  if token_frame <= 0 || live_frame <= 0; do return false; fi
+  if token_document_epoch <= 0 || pending_document_epoch <= 0; do
+    return false;
+  fi
+  if token_renderer <= 0 || target_renderer <= 0; do return false; fi
+  if token_renderer_generation <= 0 || live_renderer_generation <= 0; do
+    return false;
+  fi
+  if !navigation_pending || !frame_live || !target_site_admitted ||
+     !renderer_sandbox_verified; do return false; fi
+  return token_window == live_window &&
+         token_tab == live_tab &&
+         token_frame == live_frame &&
+         token_document_epoch == pending_document_epoch &&
+         token_renderer == target_renderer &&
+         token_renderer_generation == live_renderer_generation;
+}
+
+// Cross-process postMessage CAN cross sites, but only the trusted browser
+// IPC broker may resolve a live target frame/realm and exact targetOrigin.
+// targetOrigin="*" requires its own explicit restricted contract later;
+// this v0 routine intentionally admits exact-origin messages only.
+pub fnc may_route_frame_message(
+    int source_window, int target_window,
+    int source_frame, int target_frame,
+    int expected_target_origin, int live_target_origin,
+    int presented_target_document_epoch, int live_target_document_epoch,
+    int presented_target_renderer_generation,
+    int live_target_renderer_generation,
+    bool sender_live, bool target_live,
+    bool target_proxy_authorized, bool broker_authenticated): bool {
+  if source_window <= 0 || target_window <= 0; do return false; fi
+  if source_frame <= 0 || target_frame <= 0; do return false; fi
+  if expected_target_origin <= 0 || live_target_origin <= 0; do
+    return false;
+  fi
+  if presented_target_document_epoch <= 0 ||
+     live_target_document_epoch <= 0; do return false; fi
+  if presented_target_renderer_generation <= 0 ||
+     live_target_renderer_generation <= 0; do return false; fi
+  if !sender_live || !target_live ||
+     !target_proxy_authorized || !broker_authenticated; do
+    return false;
+  fi
+  return source_window == target_window &&
+         expected_target_origin == live_target_origin &&
+         presented_target_document_epoch == live_target_document_epoch &&
+         presented_target_renderer_generation ==
+           live_target_renderer_generation;
+}
+
+// Subframe surfaces are composited by the privileged window process only,
+// with browser-owned surface tickets tied to both frame/document and renderer
+// epochs. No untrusted renderer is allowed to choose privileged chrome bounds.
+// Bounds, hit-test clipping, visibility and occlusion remain separate gates.
+pub fnc may_composite_frame_surface(
+    int surface_window, int live_window,
+    int surface_tab, int live_tab,
+    int surface_frame, int live_frame,
+    int surface_document_epoch, int live_document_epoch,
+    int surface_renderer, int live_renderer,
+    int surface_renderer_generation, int live_renderer_generation,
+    bool surface_ticket_valid, bool renderer_live,
+    bool bounds_verified, bool sandbox_verified): bool {
+  if surface_window <= 0 || live_window <= 0; do return false; fi
+  if surface_tab <= 0 || live_tab <= 0; do return false; fi
+  if surface_frame <= 0 || live_frame <= 0; do return false; fi
+  if surface_document_epoch <= 0 || live_document_epoch <= 0; do
+    return false;
+  fi
+  if surface_renderer <= 0 || live_renderer <= 0; do return false; fi
+  if surface_renderer_generation <= 0 ||
+     live_renderer_generation <= 0; do return false; fi
+  if !surface_ticket_valid || !renderer_live ||
+     !bounds_verified || !sandbox_verified; do return false; fi
+  return surface_window == live_window &&
+         surface_tab == live_tab &&
+         surface_frame == live_frame &&
+         surface_document_epoch == live_document_epoch &&
+         surface_renderer == live_renderer &&
+         surface_renderer_generation == live_renderer_generation;
+}
+
+// Renderer retirement is allowed only after the window registry has removed
+// ALL referring frames, drained in-flight outputs and confirmed completion.
+// The real count must come from actor-owned state, not a renderer claim.
+pub fnc may_retire_unused_renderer(
+    int registry_window, int renderer_window,
+    int renderer_generation, int presented_generation,
+    int live_frame_references, int in_flight_surface_references,
+    bool registry_quiescent, bool backend_cleanup_complete): bool {
+  if registry_window <= 0 || renderer_window <= 0; do return false; fi
+  if renderer_generation <= 0 || presented_generation <= 0; do
+    return false;
+  fi
+  if live_frame_references != 0 || in_flight_surface_references != 0; do
+    return false;
+  fi
+  if !registry_quiescent || !backend_cleanup_complete; do return false; fi
+  return registry_window == renderer_window &&
+         renderer_generation == presented_generation;
+}

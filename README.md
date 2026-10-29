@@ -127,6 +127,23 @@ This test has **NOT_EXECUTED** because a linked Oreslang backend is missing.
 
 See [Milestone 1 evidence and next gates](docs/MILESTONE1.md).
 
+## Multi-renderer tabs and OOPIF foundation
+
+A tab now has a source-level Oreslang frame-to-renderer **placement contract**:
+a cross-site child frame can use its own renderer; compatible same-site
+frames in different tabs can reuse a renderer in the same window. Every
+renderer still has exactly one WindowSupervisor-owned controlling actor.
+Frame/navigation/surface epochs are fenced, and real renderer retirement
+requires all frame, IPC and compositor references to drain.
+
+New policy and fixtures are `src/browser/frame_routing_policy.ores`,
+`src/browser/window_frame_graph.ores` and
+`tests/guest/frame_routing_policy.ores`; see
+[Multi-renderer tabs](docs/MULTI_RENDERER_TABS.md).
+The source manifest now has **14** .ores acceptance programs, not proof
+of actual compiler execution. The actor demo uses fixed frame slots
+and does **not** launch a renderer or render a page.
+
 ## Next milestones
 
 Trusted BrowserSupervisor and canonical URL/origin assignment; OS-sandboxed

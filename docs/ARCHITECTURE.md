@@ -61,6 +61,23 @@ code. LLVM IsolateVM PR #1158 has a trusted in-process experimental host; it
 does NOT currently provide an OS sandbox. Never admit untrusted browser code
 to it as though it were an isolation security guarantee.
 
+## Cross-site OOPIFs and multi-renderer tabs
+
+The WindowSupervisor-owned frame registry is authoritative for
+Tab -> FrameTree -> RendererInstance. A tab may refer to multiple renderer
+processes for cross-site frames, and a suitable renderer can serve frames
+in multiple tabs of the same window. One Oreslang RendererSupervisorActor
+owns each renderer process, regardless of the number of referring frames.
+
+[Multi-renderer frame graph and security protocol](MULTI_RENDERER_TABS.md)
+defines frame attach, navigation site swap, browser-brokered cross-site
+postMessage, per-frame compositor surfaces and safe renderer refcount
+retirement. The original `src/isolation/policy.ores` postMessage function
+is intentionally SAME-TENANT ONLY and must NOT be used for general
+cross-site OOPIF messaging. The new frame broker contract permits
+cross-site delivery only with exact-origin, epoch, proxy and process
+generation verification.
+
 ## Phased implementation
 
 1. CURRENT: pure Oreslang policy gates, native Oreslang test vectors,
@@ -85,7 +102,7 @@ to it as though it were an isolation security guarantee.
 The source audit is static and cannot establish real guest execution.
 The native shell harness requires a trusted external Oreslang binary with
 SHA256 pin, exact clean Git checkout, compiler check and byte-exact stdout
-for all twelve manifested native guest fixtures. A queued or zero-step GitHub Actions job is
+for all fourteen manifested native guest fixtures. A queued or zero-step GitHub Actions job is
 **NOT_EXECUTED**, not pass/fail execution evidence. This project has not yet
 proved compilation or execution of these guests, nor any real HTML navigation.
 

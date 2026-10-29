@@ -1,0 +1,225 @@
+// Trusted WindowFrameGraphActor: bounded 2-tab/3-frame source fixture.
+// Demonstrates a tab with two renderers and SAME renderer in two tabs:
+//   Tab 1 main frame 101 -> site A renderer 10
+//   Tab 1 child 102      -> site B renderer 20 (OOPIF)
+//   Tab 2 main frame 201 -> site A renderer 10 (reuse across tabs)
+// Only WindowSupervisor may mutate this frame graph. The integer operations
+// below are LOCAL test fixture commands, NOT authenticated renderer/Qt IPC.
+// Production needs a dynamically bounded frame registry with opaque handles,
+// browser-authorized navigation tokens, surface refcounts and process tickets.
+// Renderer 10 / 20 are fixture IDs; this actor does not spawn OS processes.
+// Actor sealed state is always mutated under a critical transaction.
+define actor WindowFrameGraphActor as
+  state {
+    tab_one_main_renderer: int = 0;
+    tab_one_child_renderer: int = 0;
+    tab_two_main_renderer: int = 0;
+    child_document_epoch: int = 0;
+    revision: int = 1;
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 99; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      // Guard every mutation from revision integer overflow.
+      if operation == 1; do
+        if s.revision >= 2147483647; do return -1; fi
+        if s.tab_one_main_renderer != 0; do return -1; fi
+        s.tab_one_main_renderer = 10;
+        s.revision = s.revision + 1;
+        return 101;
+      fi
+      if operation == 2; do
+        if s.revision >= 2147483647; do return -1; fi
+        if s.tab_one_main_renderer != 10 ||
+           s.tab_one_child_renderer != 0; do return -1; fi
+        s.tab_one_child_renderer = 20;
+        s.child_document_epoch = 1;
+        s.revision = s.revision + 1;
+        return 102;
+      fi
+      if operation == 3; do
+        if s.revision >= 2147483647; do return -1; fi
+        if s.tab_two_main_renderer != 0; do return -1; fi
+        s.tab_two_main_renderer = 10;
+        s.revision = s.revision + 1;
+        return 201;
+      fi
+      // Reference counts are DERIVED from live frame bindings; never
+      // trust a renderer-supplied refcount or a stale cached count.
+      if operation == 4 || operation == 11; do
+        if s.tab_one_main_renderer == 10 &&
+           s.tab_one_child_renderer == 10 &&
+           s.tab_two_main_renderer == 10; do return 3; fi
+        if (s.tab_one_main_renderer == 10 &&
+            s.tab_one_child_renderer == 10) ||
+           (s.tab_one_main_renderer == 10 &&
+            s.tab_two_main_renderer == 10) ||
+           (s.tab_one_child_renderer == 10 &&
+            s.tab_two_main_renderer == 10); do return 2; fi
+        if s.tab_one_main_renderer == 10 ||
+           s.tab_one_child_renderer == 10 ||
+           s.tab_two_main_renderer == 10; do return 1; fi
+        return 0;
+      fi
+      if operation == 5; do
+        if s.tab_one_child_renderer == 20; do return 1; fi
+        return 0;
+      fi
+      if operation == 6; do
+        // Duplicate frame ID 102 or forged bind would be rejected.
+        return -1;
+      fi
+      if operation == 7; do
+        // Cross-site child navigates to site A; browser must have
+        // admitted renderer 10. Single atomic frame rebind + epoch bump.
+        if s.revision >= 2147483647; do return -1; fi
+        if s.tab_one_child_renderer != 20 ||
+           s.child_document_epoch != 1; do return -1; fi
+        s.tab_one_child_renderer = 10;
+        s.child_document_epoch = 2;
+        s.revision = s.revision + 1;
+        return 2;
+      fi
+      if operation == 8; do
+        // Old child surface/IPC from document epoch 1 is stale.
+        if s.child_document_epoch != 1; do return -1; fi
+        return 1;
+      fi
+      if operation == 9; do return s.child_document_epoch; fi
+      if operation == 10; do
+        // Closing Tab 1 retires its entire frame subtree atomically.
+        if s.revision >= 2147483647; do return -1; fi
+        if s.tab_one_main_renderer == 0; do return -1; fi
+        s.tab_one_main_renderer = 0;
+        s.tab_one_child_renderer = 0;
+        s.child_document_epoch = 0;
+        s.revision = s.revision + 1;
+        return 1;
+      fi
+      if operation == 12; do
+        if s.revision >= 2147483647; do return -1; fi
+        if s.tab_two_main_renderer == 0; do return -1; fi
+        s.tab_two_main_renderer = 0;
+        s.revision = s.revision + 1;
+        return 1;
+      fi
+      if operation == 13; do
+        if s.tab_one_main_renderer != 0 ||
+           s.tab_one_child_renderer != 0 ||
+           s.tab_two_main_renderer != 0; do return -1; fi
+        // Absence of frame bindings alone does NOT authorize physical
+        // process termination; production awaits compositor/IPC drains.
+        return 1;
+      fi
+      if operation == 14; do return s.revision; fi
+      return -1;
+    });
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val window = await spawn WindowFrameGraphActor();
+  window.send(1);
+  val tab1main = (await window.outputs.next()).value.unwrap();
+  window.send(2);
+  val tab1oopif = (await window.outputs.next()).value.unwrap();
+  window.send(3);
+  val tab2main = (await window.outputs.next()).value.unwrap();
+  if tab1main.value != 101 || tab1oopif.value != 102 ||
+     tab2main.value != 201; do
+    stdio.stdout.write("FAIL:frame-bindings"); return;
+  fi
+
+  window.send(4);
+  val shared = (await window.outputs.next()).value.unwrap();
+  window.send(5);
+  val oopif = (await window.outputs.next()).value.unwrap();
+  if shared.value != 2 || oopif.value != 1; do
+    stdio.stdout.write("FAIL:many-to-many"); return;
+  fi
+  window.send(14);
+  val before = (await window.outputs.next()).value.unwrap();
+  if before.value != 4; do
+    stdio.stdout.write("FAIL:revision-before"); return;
+  fi
+  window.send(6);
+  val duplicate = (await window.outputs.next()).value.unwrap();
+  window.send(14);
+  val still_before = (await window.outputs.next()).value.unwrap();
+  if duplicate.value != -1 || still_before.value != 4; do
+    stdio.stdout.write("FAIL:duplicate-frame"); return;
+  fi
+
+  // Rebind cross-site OOPIF into same-site renderer with epoch fencing.
+  window.send(7);
+  val nav = (await window.outputs.next()).value.unwrap();
+  window.send(4);
+  val after_a = (await window.outputs.next()).value.unwrap();
+  window.send(5);
+  val after_b = (await window.outputs.next()).value.unwrap();
+  if nav.value != 2 || after_a.value != 3 || after_b.value != 0; do
+    stdio.stdout.write("FAIL:atomic-rebind"); return;
+  fi
+  window.send(8);
+  val stale = (await window.outputs.next()).value.unwrap();
+  if stale.value != -1; do
+    stdio.stdout.write("FAIL:stale-child-surface"); return;
+  fi
+  window.send(7);
+  val duplicate_nav = (await window.outputs.next()).value.unwrap();
+  if duplicate_nav.value != -1; do
+    stdio.stdout.write("FAIL:duplicate-navigation"); return;
+  fi
+  window.send(13);
+  val live_retire = (await window.outputs.next()).value.unwrap();
+  if live_retire.value != -1; do
+    stdio.stdout.write("FAIL:premature-retire"); return;
+  fi
+
+  window.send(10);
+  val tab1closed = (await window.outputs.next()).value.unwrap();
+  window.send(11);
+  val tab2stillthere = (await window.outputs.next()).value.unwrap();
+  if tab1closed.value != 1 || tab2stillthere.value != 1; do
+    stdio.stdout.write("FAIL:cross-tab-damage"); return;
+  fi
+  window.send(12);
+  val tab2closed = (await window.outputs.next()).value.unwrap();
+  window.send(13);
+  val now_empty = (await window.outputs.next()).value.unwrap();
+  if tab2closed.value != 1 || now_empty.value != 1; do
+    stdio.stdout.write("FAIL:frame-drain"); return;
+  fi
+  window.send(14);
+  val revision = (await window.outputs.next()).value.unwrap();
+  if revision.value != 7; do
+    stdio.stdout.write("FAIL:revision-after"); return;
+  fi
+
+  // Separate windows MUST NOT share their frame graph or renderer refs.
+  val other_window = await spawn WindowFrameGraphActor();
+  other_window.send(4);
+  val independent = (await other_window.outputs.next()).value.unwrap();
+  if independent.value != 0; do
+    stdio.stdout.write("FAIL:window-state-leak"); return;
+  fi
+  other_window.send(99);
+  val other_stopped = (await other_window.outputs.next()).value.unwrap();
+  window.send(99);
+  val stopped = (await window.outputs.next()).value.unwrap();
+  await other_window.get_done();
+  await window.get_done();
+  if other_stopped.value != 0 || stopped.value != 0; do
+    stdio.stdout.write("FAIL:frame-stop"); return;
+  fi
+  stdio.stdout.write("browser:frame-graph-ok");
+  return;
+}
