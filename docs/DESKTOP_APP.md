@@ -18,6 +18,11 @@ test/compile instructions and the missing actual Oreslang exported library.
 
 Browser application logic, permission rules, history, tab strip, notification
 broker, service-worker registration and actor supervision belong in **Oreslang**.
+The new target is one Oreslang window OS process and one controlling actor
+per renderer process, with site-tenant IsolateVMs, plus a separate per-profile
+broker for cross-window shared services. See
+[WINDOW_RENDERER_SITE_TENANTS.md](WINDOW_RENDERER_SITE_TENANTS.md).
+Same-site subdomains do not get same-origin DOM or storage authority.
 A **minimal platform adapter** exposes OS primitives but **must not embed
 Chromium, CEF, WKWebView, WebView2, Electron or another browser WebView** and
 must not implement browser control-plane semantics in JS/Node/Python.
@@ -29,8 +34,11 @@ Boundary:
 - Oreslang WindowTabStripActor: current index/focus commands; per-tab
   TabSessionActor: bounded history ordering. These are proof-of-concept
   index/session models; stable tab handles and URL history are future work.
-- Sandboxed renderer worker processes: tenant+origin locked IsolateVM, one
-  or more document/frame, DOM/CSS/JS/worker actors. At present **not built**.
+- Sandboxed renderer worker processes: site-tenant locked IsolateVM, one
+  controlling RendererSupervisorActor per worker, and separate per-origin JS
+  realms plus exact-origin storage/permission broker checks.
+  High-risk, independently controlled subdomains and incompatible context
+  groups force separate renderers. At present **not built**.
 - Narrow OS adapters:
   - macOS: native Cocoa/Metal window and compositor surfaces; OS notification
     APIs; accessibility and keychain primitives.

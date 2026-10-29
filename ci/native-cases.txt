@@ -7,3 +7,5 @@ tests/guest/notification_policy.ores|browser:notifications-policy-ok
 tests/guest/service_worker_policy.ores|browser:service-worker-policy-ok
 src/workers/lifecycle.ores|browser:worker-lifecycle-ok
 tests/guest/ui_dispatch_policy.ores|browser:ui-ffi-policy-ok
+tests/guest/site_tenant_policy.ores|browser:site-tenant-policy-ok
+src/browser/renderer_supervisor.ores|browser:renderer-supervisor-ok

@@ -1,8 +1,34 @@
 # Oreslang Web Browser
 
-**Oreslang-first, actor-native browser prototype** with intended strict
-per-tenant/per-origin process isolation. This new repository is NOT YET a
+**Oreslang-first, actor-native browser prototype** with planned per-window
+Oreslang processes, per-renderer actors and schemeful-site tenant isolates.
+Current origin-locked policy remains a stricter bootstrap gate. This new repository is NOT YET a
 working browser or OS security sandbox.
+
+## Window / site-tenant renderer model (design updated)
+
+**Target:** one Oreslang window-control OS process per desktop window,
+one **RendererSupervisorActor per sandboxed renderer OS process**, and
+one site-scoped IsolateVM per (window, profile, partition, schemeful
+registrable domain) as the usual placement target. For example,
+`www.example.com` and `api.example.com` may share the
+`https://example.com` site tenant, **not the same web origin**.
+Qt/QML is still strictly presentation/FFI. Profile-wide permissions,
+storage, notifications and worker lifetime require a separate trusted
+profile broker shared across windows.
+
+Security exceptions may require *multiple* renderer/IsolateVM instances
+for a site (independently-controlled subdomain hosting, COOP/OAC,
+cross-origin-isolated contexts, browsing-context constraints, quotas).
+All DOM/storage/service-worker access remains exact-origin/partition
+checked. Existing origin-per-renderer predicates stay strict until
+the genuine window registry, PSL/URL canonicalizer, and sandbox
+integration exist. **This does not yet run a renderer or a second window.**
+
+New Oreslang sources: `src/isolation/site_tenant_policy.ores`,
+`src/browser/renderer_supervisor.ores`, and
+`tests/guest/site_tenant_policy.ores`. Read the complete
+[window/renderers/site-tenant architecture](docs/WINDOW_RENDERER_SITE_TENANTS.md).
 
 ## Implemented in this initial branch
 
@@ -66,7 +92,7 @@ current status.
   scoped fetch, staged activation, bounded wake/push admission.
 - `src/workers/lifecycle.ores`: service-worker registration actor
   demonstration, including waiting updates and idle restarts.
-- Native guest manifest now has **nine** Oreslang sources, gated by
+- Native guest manifest now has **eleven** Oreslang sources, gated by
   a compiler SHA pin. Compilation and real execution remain unverified.
 
 The desktop implementation will be a **native app, not Electron or

@@ -1,0 +1,81 @@
+// ONE Oreslang supervisor actor per sandboxed renderer process.
+// Native fixture: local generation/lifecycle state, not OS process launch.
+// Integer actor commands are trusted-fixture-only, NOT authentic IPC:
+// 1 = host bound renderer generation 1, 2 = duplicate bind, 3 = stale
+// notification, 4 = fresh renderer crash; 5 = shutdown.
+// Production supervisor uses typed/authorized IPC and a real process handle.
+define actor RendererSupervisorActor as
+  let int renderer_generation = 0;
+  let bool renderer_live = false;
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 1; do
+      if self.renderer_generation != 0; do
+        self.send(-1); return;
+      fi
+      self.renderer_generation = 1;
+      self.renderer_live = true;
+      self.send(1); return;
+    fi
+    if mail.value == 2; do
+      // A renderer cannot be rebound to another actor in the registry.
+      self.send(-1); return;
+    fi
+    if mail.value == 3; do
+      // An old-generation event is fenced out after restart/crash.
+      self.send(-1); return;
+    fi
+    if mail.value == 4; do
+      if !self.renderer_live; do self.send(-1); return; fi
+      self.renderer_live = false;
+      self.renderer_generation = self.renderer_generation + 1;
+      self.send(2); return;
+    fi
+    if mail.value == 5; do
+      self.renderer_live = false;
+      self.send(0);
+      self.end();
+      return;
+    fi
+    self.send(-1);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val renderer_a = await spawn RendererSupervisorActor();
+  val renderer_b = await spawn RendererSupervisorActor();
+  renderer_a.send(1);
+  val bind_a = (await renderer_a.outputs.next()).value.unwrap();
+  renderer_b.send(1);
+  val bind_b = (await renderer_b.outputs.next()).value.unwrap();
+  if bind_a.value != 1 || bind_b.value != 1; do
+    stdio.stdout.write("FAIL:renderer-bind"); return;
+  fi
+  renderer_a.send(2);
+  val duplicate = (await renderer_a.outputs.next()).value.unwrap();
+  if duplicate.value != -1; do
+    stdio.stdout.write("FAIL:duplicate-bind"); return;
+  fi
+  renderer_a.send(4);
+  val crashed = (await renderer_a.outputs.next()).value.unwrap();
+  if crashed.value != 2; do
+    stdio.stdout.write("FAIL:crash-generation"); return;
+  fi
+  renderer_a.send(3);
+  val stale = (await renderer_a.outputs.next()).value.unwrap();
+  if stale.value != -1; do
+    stdio.stdout.write("FAIL:stale-notice"); return;
+  fi
+  renderer_a.send(5);
+  val stopped_a = (await renderer_a.outputs.next()).value.unwrap();
+  renderer_b.send(5);
+  val stopped_b = (await renderer_b.outputs.next()).value.unwrap();
+  await renderer_a.get_done();
+  await renderer_b.get_done();
+  if stopped_a.value != 0 || stopped_b.value != 0; do
+    stdio.stdout.write("FAIL:renderer-drain"); return;
+  fi
+  stdio.stdout.write("browser:renderer-supervisor-ok");
+  return;
+}

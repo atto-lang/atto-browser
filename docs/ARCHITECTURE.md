@@ -1,25 +1,36 @@
 # Browser architecture and security gates
 
-## Isolation hierarchy
+## Accepted placement target (one window process / one actor per renderer)
 
-BrowserSupervisor (trusted browser coordinator and platform primitives)
-  - Profile/tenant 1
-    - Renderer A: OS-sandboxed process, exact origin https://a.example:443
-      - OresVM/IsolateVM: document, DOM, JS realm and worker actors
-    - Renderer B: OS-sandboxed process, exact origin https://b.example:443
-      - OresVM/IsolateVM: cross-origin iframe actors
-  - Profile/tenant 2
-    - Renderer C: different OS-sandboxed process for https://a.example:443
+See [WINDOW_RENDERER_SITE_TENANTS.md](WINDOW_RENDERER_SITE_TENANTS.md)
+for the complete authoritative decision. The target uses one Oreslang
+WindowSupervisor OS process per window, one RendererSupervisorActor per
+sandboxed renderer OS process, and a site-locked IsolateVM per
+(window, profile, storage partition, schemeful registrable domain)
+where compatible. A separate ProfileBroker owns cross-window authority.
 
-The actual trusted supervisor, renderer process, networking and HTML/JS engine
-**are not implemented**. src/isolation/policy.ores is a pure policy prototype.
+- A "www" host identifies one entry origin for a schemeful-site tenant
+  (for example `https://www.example.com` belongs to `https://example.com`).
+- Subdomains MAY share the site-locked process/IsolateVM, but must retain
+  distinct DOM, cookie/storage, service worker and capability checks as
+  appropriate for their **exact origins**. No same-site shortcut for
+  privileged origin access.
+- Customer-controlled hosting, explicit origin isolation, opaque origins
+  and agent-cluster/COOP/OAC requirements force separate renderer/IsolateVM
+  placement where needed. Cross-site frames use separate renderers.
+- `src/isolation/policy.ores` still implements the earlier, **stricter**
+  origin-locked bootstrap predicate. It must not be silently replaced
+  by site-tenant placement without real broker and process enforcement.
+- `src/isolation/site_tenant_policy.ores` and
+  `src/browser/renderer_supervisor.ores` are new Oreslang policy and
+  actor prototypes. None launches OS processes or implements real IsolateVM.
 
 ## Boundary and identity rules
 
-- Use a strict **(tenant, canonical origin)** process lock. Canonical origin is
-  scheme + host + effective port, NOT simply the DNS domain or registrable
-  eTLD+1. Cross-origin iframe content uses a separate renderer, even when
-  inside one browser tab. Different profiles always get different renderers.
+- The trusted profile broker assigns `profile_id`,
+  `site_tenant_id`, `origin_id`, `storage_partition_id`, `window_id`,
+  and generation-fenced renderer/process actor IDs; sites are resolved
+  with a trusted Public Suffix List and canonical URL parser.
 - A trusted browser service must issue positive opaque IDs for canonical
   origins, tenant profiles, tabs, document epochs and renderer generations.
   The positive integer arguments in v0 are fixture inputs, NOT validated URLs,
@@ -71,7 +82,7 @@ to it as though it were an isolation security guarantee.
 The source audit is static and cannot establish real guest execution.
 The native shell harness requires a trusted external Oreslang binary with
 SHA256 pin, exact clean Git checkout, compiler check and byte-exact stdout
-for all nine manifested native guest fixtures. A queued or zero-step GitHub Actions job is
+for all eleven manifested native guest fixtures. A queued or zero-step GitHub Actions job is
 **NOT_EXECUTED**, not pass/fail execution evidence. This project has not yet
 proved compilation or execution of these guests, nor any real HTML navigation.
 

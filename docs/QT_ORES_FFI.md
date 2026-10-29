@@ -3,6 +3,11 @@
 ## Mandatory architecture
 
 **Oreslang is the browser backend. Qt 6 Quick/QML is a privileged presentation shell only.**
+The target uses one Oreslang WindowSupervisor OS process per window and
+one controlling RendererSupervisorActor per sandboxed renderer process,
+with site-scoped IsolateVM placement and cross-origin realm isolation.
+Profile-wide state lives in a trusted ProfileBroker, not isolated
+window-private copies. See [WINDOW_RENDERER_SITE_TENANTS.md](WINDOW_RENDERER_SITE_TENANTS.md).
 Qt hosts native windows, accessibility, the address bar, toolbar, tab-strip
 visuals, keyboard shortcuts and a future compositor surface. **Qt does not
 host the website rendering engine, network stack, origin policy, permission

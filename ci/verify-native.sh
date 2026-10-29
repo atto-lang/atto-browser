@@ -38,7 +38,8 @@ count=0
 while IFS='|' read -r source expected || [ -n "$source" ]; do
   [ -n "$source" ] || continue
   case "$source" in
-    tests/guest/isolation_policy.ores | src/browser/tab_epoch.ores | \
+    tests/guest/isolation_policy.ores | tests/guest/site_tenant_policy.ores | \
+    src/browser/renderer_supervisor.ores | src/browser/tab_epoch.ores | \
     tests/guest/tab_policy.ores | tests/guest/ui_dispatch_policy.ores | \
     src/desktop/tab_session.ores | \
     src/desktop/window_tab_strip.ores | \
@@ -47,7 +48,8 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
     *) die "INVALID_CASE_PATH: $source" ;;
   esac
   case "$expected" in
-    browser:isolation-policy-ok | browser:tab-epoch-ok | \
+    browser:isolation-policy-ok | browser:site-tenant-policy-ok | \
+    browser:renderer-supervisor-ok | browser:tab-epoch-ok | \
     browser:desktop-policy-ok | browser:ui-ffi-policy-ok | \
     browser:tab-session-ok | \
     browser:tab-strip-ok | browser:notifications-policy-ok | \
@@ -60,6 +62,8 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
   printf '%s\n' "$source" >> "$tmp/seen"
   case "$source|$expected" in
     "tests/guest/isolation_policy.ores|browser:isolation-policy-ok") ;;
+    "tests/guest/site_tenant_policy.ores|browser:site-tenant-policy-ok") ;;
+    "src/browser/renderer_supervisor.ores|browser:renderer-supervisor-ok") ;;
     "src/browser/tab_epoch.ores|browser:tab-epoch-ok") ;;
     "tests/guest/tab_policy.ores|browser:desktop-policy-ok") ;;
     "tests/guest/ui_dispatch_policy.ores|browser:ui-ffi-policy-ok") ;;
@@ -79,6 +83,6 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
   count=$((count + 1))
   printf 'NATIVE_CASE_PASS path=%s source_blob=%s\n' "$source" "$(git rev-parse "HEAD:$source")"
 done < ci/native-cases.txt
-[ "$count" -eq 9 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
-[ "$(wc -l < "$tmp/seen" | tr -d ' ')" -eq 9 ] || die "NATIVE_DUPLICATE_COVERAGE"
+[ "$count" -eq 11 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
+[ "$(wc -l < "$tmp/seen" | tr -d ' ')" -eq 11 ] || die "NATIVE_DUPLICATE_COVERAGE"
 printf 'NATIVE_ACCEPTANCE_PASS count=%s source_sha=%s compiler_sha256=%s\n' "$count" "$head" "$actual"
