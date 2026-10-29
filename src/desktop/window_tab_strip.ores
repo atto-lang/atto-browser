@@ -7,14 +7,8 @@ define actor WindowTabStripActor as
     selected_index: int = 0;
   }
 
-  receive(ActorMail<String> mail): void {
-    if mail.value == "quit"; do
-      self.send(0);
-      self.end();
-      return;
-    fi
-    val operation = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  handle_operation(operation: String): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       if operation == "new"; do
         if s.tab_count >= 64; do return -1; fi
         s.tab_count = s.tab_count + 1;
@@ -49,6 +43,16 @@ define actor WindowTabStripActor as
       fi
       return -1;
     });
+  }
+
+  receive(ActorMail<String> mail): void {
+    if mail.value == "quit"; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
     self.send(reply);
     return;
   }
