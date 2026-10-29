@@ -45,4 +45,10 @@ printf 'modified\n' >> example.txt
 assert_fail "$source_sha" "$source_tree" "$mirror_sha"
 git restore example.txt
 assert_pass "$source_sha" "$source_tree" "$mirror_sha"
+# File modes are part of the Git tree even when blob bytes are identical.
+git update-index --chmod=+x example.txt
+git commit -qm "synthetic file mode change"
+mode_sha=$(git rev-parse HEAD)
+[ "$(git rev-parse 'HEAD^{tree}')" != "$source_tree" ]
+assert_fail "$source_sha" "$source_tree" "$mode_sha"
 printf 'MIRROR_IDENTITY_NEGATIVE_TESTS_PASS\n'
