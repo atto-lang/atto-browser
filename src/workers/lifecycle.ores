@@ -1,71 +1,71 @@
-// Actor-owned service-worker registration prototype: staged update coexists
-// with old active worker; event threads can sleep between deliveries.
-// "activate-update" is a TRUSTED-BROKER command after policy approval.
-// This does not execute JS, fetch events, or durable storage.
+// Actor-owned service-worker lifecycle demonstration. All mutable instance
+// data is in the sole state field and guarded by handle_state(critical ...).
+// No JS worker, persistence, network or privileged broker exists yet.
 define actor WorkerRegistrationActor as
-  let bool registered = false;
-  let bool active = false;
-  let bool running = false;
-  let bool waiting = false;
-  let int generation = 0;
+  state {
+    registered: bool = false;
+    active: bool = false;
+    running: bool = false;
+    waiting: bool = false;
+    generation: int = 0;
+  }
 
   receive(ActorMail<String> mail): void {
-    if mail.value == "register"; do
-      if self.registered; do self.send("duplicate"); return; fi
-      self.registered = true;
-      self.waiting = true;
-      self.send("installed-waiting"); return;
-    fi
-    if mail.value == "activate"; do
-      if !self.registered || !self.waiting || self.active; do
-        self.send("rejected"); return;
+    val operation = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      if operation == "register"; do
+        if s.registered; do return "duplicate"; fi
+        s.registered = true;
+        s.waiting = true;
+        return "installed-waiting";
       fi
-      self.generation = 1;
-      self.waiting = false;
-      self.active = true;
-      self.running = true;
-      self.send("active"); return;
-    fi
-    if mail.value == "stage-update"; do
-      if !self.active || self.waiting; do
-        self.send("rejected"); return;
+      if operation == "activate"; do
+        if !s.registered || !s.waiting || s.active; do
+          return "rejected";
+        fi
+        s.generation = 1;
+        s.waiting = false;
+        s.active = true;
+        s.running = true;
+        return "active";
       fi
-      self.waiting = true;
-      self.send("update-waiting"); return;
-    fi
-    if mail.value == "activate-update"; do
-      if !self.registered || !self.active || !self.waiting; do
-        self.send("rejected"); return;
+      if operation == "stage-update"; do
+        if !s.active || s.waiting; do return "rejected"; fi
+        s.waiting = true;
+        return "update-waiting";
       fi
-      self.generation = self.generation + 1;
-      self.waiting = false;
-      self.running = true;
-      self.send("update-active"); return;
-    fi
-    if mail.value == "sleep"; do
-      if !self.active || !self.running; do
-        self.send("rejected"); return;
+      if operation == "activate-update"; do
+        if !s.registered || !s.active || !s.waiting; do
+          return "rejected";
+        fi
+        s.generation = s.generation + 1;
+        s.waiting = false;
+        s.running = true;
+        return "update-active";
       fi
-      self.running = false;
-      self.send("dormant"); return;
-    fi
-    if mail.value == "wake"; do
-      if !self.active || self.running; do
-        self.send("rejected"); return;
+      if operation == "sleep"; do
+        if !s.active || !s.running; do return "rejected"; fi
+        s.running = false;
+        return "dormant";
       fi
-      self.running = true;
-      self.send("awakened"); return;
-    fi
-    if mail.value == "unregister"; do
-      self.registered = false;
-      self.waiting = false;
-      self.active = false;
-      self.running = false;
-      self.send("unregistered");
+      if operation == "wake"; do
+        if !s.active || s.running; do return "rejected"; fi
+        s.running = true;
+        return "awakened";
+      fi
+      if operation == "unregister"; do
+        s.registered = false;
+        s.waiting = false;
+        s.active = false;
+        s.running = false;
+        return "unregistered";
+      fi
+      return "rejected";
+    });
+    self.send(reply);
+    if operation == "unregister" && reply == "unregistered"; do
       self.end();
-      return;
     fi
-    self.send("rejected");
     return;
   }
 end
