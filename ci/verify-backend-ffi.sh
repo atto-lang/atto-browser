@@ -47,4 +47,4 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I include \
   tests/abi/backend_integration.c -ldl -o "$tmp/backend-ffi"
 "$limiter" --kill-after=5s 30s "$tmp/backend-ffi" "$ORES_BROWSER_BACKEND_LIB" ||
   fail "real Oreslang backend FFI execution failed"
-printf 'NATIVE_BACKEND_FFI_ACCEPTANCE_PASS source_sha=%s backend_sha256=%s\n' "$head" "$actual"
+printf 'NATIVE_BACKEND_FFI_ACCEPTANCE_PASS source_sha=%s checkout_sha=%s tree_sha=%s backend_sha256=%s\n' "$EXPECTED_SOURCE_SHA" "$head" "$tree" "$actual"
