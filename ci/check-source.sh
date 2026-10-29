@@ -62,6 +62,10 @@ for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     exit 1
   }
   grep -Fq 'self.handle_state(critical |s|' "$actor"
+  grep -Fq 'using state.read, state.write {' "$actor" || {
+    echo "MISSING_STATE_EFFECT_DECLARATION: $actor" >&2
+    exit 1
+  }
   if grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' "$actor" |
        grep -Ev 'self\.(send|end|handle_state)\('; then
     echo "DIRECT_ACTOR_FIELD_ACCESS: $actor" >&2
