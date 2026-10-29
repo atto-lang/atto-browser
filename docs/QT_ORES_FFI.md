@@ -69,7 +69,7 @@ generation-fenced tab identities. Backend canonicalizes navigation URLs.
 `OresBrowserSnapshot` is backend-owned state copied as bounded value data:
 at most 64 tabs, title 159 UTF-8 bytes plus NUL, URL 2047 UTF-8 bytes plus
 NUL, revision monotonic, one selected tab when nonempty, bool fields 0/1,
-reserved fields zero. All C ABI structs carry version/size where applicable.
+reserved fields zero. Live tab IDs must be unique inside a snapshot. Fixed-size\nUTF-8 strings must be canonical, NUL-terminated, and zero-padded after\nthe first NUL. A valid encoded U+FFFD is allowed; invalid UTF-8 is not.\nAll C ABI structs carry version/size where applicable.
 The UI rejects malformed values; no Oreslang heap pointers, Qt objects or
 cross-language allocators appear in structs. Future larger snapshots should
 introduce ABI v2, not silently break v1.
@@ -108,7 +108,7 @@ secure startup IPC or sandbox in this slice.
 ## Build and run the Qt presentation shell
 
 Requirements: CMake 3.21+, C++17, Qt 6.5+ (Quick, Qml, QuickControls2).
-Actual Qt configuration, compilation and GUI launch are **NOT VERIFIED**
+Portable C11 and C++17 ABI layout assertions have been compiled and executed\nlocally against Git-SHA-verified exact header/test blobs. These assertions\ncheck the ABI's byte sizes and offsets only, not a linked backend.\nActual Qt configuration, compilation and GUI launch are **NOT VERIFIED**
 in the present environment; Qt 6 Quick libraries are not installed there.
 
 ```sh
