@@ -74,3 +74,10 @@ SHA256 pin, exact clean Git checkout, compiler check and byte-exact stdout
 for the two native guest fixtures. A queued or zero-step GitHub Actions job is
 **NOT_EXECUTED**, not pass/fail execution evidence. This project has not yet
 proved compilation or execution of these guests, nor any real HTML navigation.
+
+## Native desktop / background services extension
+
+See [DESKTOP_APP.md](DESKTOP_APP.md) for the native tab strip, address bar,
+service-worker lifecycle, notification UX and security gating plan. The
+second source slice is Oreslang-only policy/actor code; it has NOT created
+a real OS window, sandbox, network request or rendered web content.

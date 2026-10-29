@@ -1,0 +1,123 @@
+// Actor-owned service-worker registration prototype: staged update coexists
+// with old active worker; event threads can sleep between deliveries.
+// "activate-update" is a TRUSTED-BROKER command after policy approval.
+// This does not execute JS, fetch events, or durable storage.
+define actor WorkerRegistrationActor as
+  let bool registered = false;
+  let bool active = false;
+  let bool running = false;
+  let bool waiting = false;
+  let int generation = 0;
+
+  receive(ActorMail<String> mail): void {
+    if mail.value == "register"; do
+      if self.registered; do self.send("duplicate"); return; fi
+      self.registered = true;
+      self.waiting = true;
+      self.send("installed-waiting"); return;
+    fi
+    if mail.value == "activate"; do
+      if !self.registered || !self.waiting || self.active; do
+        self.send("rejected"); return;
+      fi
+      self.generation = 1;
+      self.waiting = false;
+      self.active = true;
+      self.running = true;
+      self.send("active"); return;
+    fi
+    if mail.value == "stage-update"; do
+      if !self.active || self.waiting; do
+        self.send("rejected"); return;
+      fi
+      self.waiting = true;
+      self.send("update-waiting"); return;
+    fi
+    if mail.value == "activate-update"; do
+      if !self.registered || !self.active || !self.waiting; do
+        self.send("rejected"); return;
+      fi
+      self.generation = self.generation + 1;
+      self.waiting = false;
+      self.running = true;
+      self.send("update-active"); return;
+    fi
+    if mail.value == "sleep"; do
+      if !self.active || !self.running; do
+        self.send("rejected"); return;
+      fi
+      self.running = false;
+      self.send("dormant"); return;
+    fi
+    if mail.value == "wake"; do
+      if !self.active || self.running; do
+        self.send("rejected"); return;
+      fi
+      self.running = true;
+      self.send("awakened"); return;
+    fi
+    if mail.value == "unregister"; do
+      self.registered = false;
+      self.waiting = false;
+      self.active = false;
+      self.running = false;
+      self.send("unregistered");
+      self.end();
+      return;
+    fi
+    self.send("rejected");
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val registration = await spawn WorkerRegistrationActor();
+  registration.send("activate");
+  val premature = (await registration.outputs.next()).value.unwrap();
+  if premature.value != "rejected"; do
+    stdio.stdout.write("FAIL:premature-activate"); return;
+  fi
+  registration.send("register");
+  val registered = (await registration.outputs.next()).value.unwrap();
+  if registered.value != "installed-waiting"; do
+    stdio.stdout.write("FAIL:register"); return;
+  fi
+  registration.send("activate");
+  val active = (await registration.outputs.next()).value.unwrap();
+  if active.value != "active"; do
+    stdio.stdout.write("FAIL:activate"); return;
+  fi
+  registration.send("stage-update");
+  val update = (await registration.outputs.next()).value.unwrap();
+  if update.value != "update-waiting"; do
+    stdio.stdout.write("FAIL:stage"); return;
+  fi
+  registration.send("stage-update");
+  val duplicate = (await registration.outputs.next()).value.unwrap();
+  if duplicate.value != "rejected"; do
+    stdio.stdout.write("FAIL:duplicate-update"); return;
+  fi
+  registration.send("sleep");
+  val dormant = (await registration.outputs.next()).value.unwrap();
+  if dormant.value != "dormant"; do
+    stdio.stdout.write("FAIL:sleep"); return;
+  fi
+  registration.send("wake");
+  val awakened = (await registration.outputs.next()).value.unwrap();
+  if awakened.value != "awakened"; do
+    stdio.stdout.write("FAIL:wake"); return;
+  fi
+  registration.send("activate-update");
+  val promoted = (await registration.outputs.next()).value.unwrap();
+  if promoted.value != "update-active"; do
+    stdio.stdout.write("FAIL:promote"); return;
+  fi
+  registration.send("unregister");
+  val stopped = (await registration.outputs.next()).value.unwrap();
+  await registration.get_done();
+  if stopped.value != "unregistered"; do
+    stdio.stdout.write("FAIL:unregister"); return;
+  fi
+  stdio.stdout.write("browser:worker-lifecycle-ok");
+  return;
+}

@@ -38,15 +38,35 @@ count=0
 while IFS='|' read -r source expected || [ -n "$source" ]; do
   [ -n "$source" ] || continue
   case "$source" in
-    tests/guest/isolation_policy.ores | src/browser/tab_epoch.ores) ;;
+    tests/guest/isolation_policy.ores | src/browser/tab_epoch.ores | \
+    tests/guest/tab_policy.ores | src/desktop/tab_session.ores | \
+    src/desktop/window_tab_strip.ores | \
+    tests/guest/notification_policy.ores | \
+    tests/guest/service_worker_policy.ores | src/workers/lifecycle.ores) ;;
     *) die "INVALID_CASE_PATH: $source" ;;
   esac
   case "$expected" in
-    browser:isolation-policy-ok | browser:tab-epoch-ok) ;;
+    browser:isolation-policy-ok | browser:tab-epoch-ok | \
+    browser:desktop-policy-ok | browser:tab-session-ok | \
+    browser:tab-strip-ok | browser:notifications-policy-ok | \
+    browser:service-worker-policy-ok | browser:worker-lifecycle-ok) ;;
     *) die "INVALID_EXPECTED_OUTPUT: $source" ;;
   esac
   [ -f "$source" ] || die "MISSING_SOURCE: $source"
   git ls-files --error-unmatch "$source" >/dev/null || die "UNTRACKED_SOURCE"
+  if grep -Fxq "$source" "$tmp/seen" 2>/dev/null; then die "DUPLICATE_CASE: $source"; fi
+  printf '%s\\n' "$source" >> "$tmp/seen"
+  case "$source|$expected" in
+    "tests/guest/isolation_policy.ores|browser:isolation-policy-ok") ;;
+    "src/browser/tab_epoch.ores|browser:tab-epoch-ok") ;;
+    "tests/guest/tab_policy.ores|browser:desktop-policy-ok") ;;
+    "src/desktop/tab_session.ores|browser:tab-session-ok") ;;
+    "src/desktop/window_tab_strip.ores|browser:tab-strip-ok") ;;
+    "tests/guest/notification_policy.ores|browser:notifications-policy-ok") ;;
+    "tests/guest/service_worker_policy.ores|browser:service-worker-policy-ok") ;;
+    "src/workers/lifecycle.ores|browser:worker-lifecycle-ok") ;;
+    *) die "CASE_EXPECTED_PAIR_MISMATCH: $source" ;;
+  esac
   "$limiter" --kill-after=5s 25s "$ORESLANG_BIN" --check "$source" > "$tmp/check" 2> "$tmp/check.err" ||
     { cat "$tmp/check.err" >&2; die "NATIVE_CHECK_FAILED: $source"; }
   "$limiter" --kill-after=5s 25s "$ORESLANG_BIN" "$source" > "$tmp/output" 2> "$tmp/exec.err" ||
@@ -56,5 +76,6 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
   count=$((count + 1))
   printf 'NATIVE_CASE_PASS path=%s source_blob=%s\n' "$source" "$(git rev-parse "HEAD:$source")"
 done < ci/native-cases.txt
-[ "$count" -eq 2 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
+[ "$count" -eq 8 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
+[ "$(wc -l < "$tmp/seen" | tr -d ' ')" -eq 8 ] || die "NATIVE_DUPLICATE_COVERAGE"
 printf 'NATIVE_ACCEPTANCE_PASS count=%s source_sha=%s compiler_sha256=%s\n' "$count" "$head" "$actual"

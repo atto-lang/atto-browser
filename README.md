@@ -33,6 +33,30 @@ an executable compiler, clean exact checkout, source checks and byte-for-byte
 execution results. At PR creation no genuine native execution has been
 demonstrated; compiler runs must be recorded separately.
 
+## Native desktop tabs, notifications, and workers — second slice
+
+- `src/desktop/window_tab_strip.ores`: bounded actor-owned tab strip
+  index/focus model (new, next, previous, close, quit).
+- `src/desktop/tab_session.ores`: per-tab actor history with
+  back/forward and navigation resetting the forward chain.
+- `src/desktop/tab_policy.ores`: profile/tenant/private-mode opening,
+  focus, restore and safe tab movement.
+- `src/notifications/notification_policy.ores`: explicit permission
+  prompts, native OS delivery gates, per-site spam limits, DND,
+  private-mode protection and replay-fenced notification click routing.
+- `src/workers/service_worker_policy.ores`: partitioned registration,
+  scoped fetch, staged activation, bounded wake/push admission.
+- `src/workers/lifecycle.ores`: service-worker registration actor
+  demonstration, including waiting updates and idle restarts.
+- Native guest manifest now has **eight** Oreslang sources, gated by
+  a compiler SHA pin. Compilation and real execution remain unverified.
+
+The desktop implementation will be a **native app, not Electron or
+an embedded WebView**. OS-only platform adapters may be written in
+Rust/C++ while all browser control-plane behavior stays in Oreslang.
+See [desktop architecture and security gates](docs/DESKTOP_APP.md).
+An actual platform window or website renderer is **not yet implemented**.
+
 ## Next milestones
 
 Trusted BrowserSupervisor and canonical URL/origin assignment; OS-sandboxed

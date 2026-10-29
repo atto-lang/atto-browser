@@ -1,2 +1,8 @@
 tests/guest/isolation_policy.ores|browser:isolation-policy-ok
 src/browser/tab_epoch.ores|browser:tab-epoch-ok
+tests/guest/tab_policy.ores|browser:desktop-policy-ok
+src/desktop/tab_session.ores|browser:tab-session-ok
+src/desktop/window_tab_strip.ores|browser:tab-strip-ok
+tests/guest/notification_policy.ores|browser:notifications-policy-ok
+tests/guest/service_worker_policy.ores|browser:service-worker-policy-ok
+src/workers/lifecycle.ores|browser:worker-lifecycle-ok
