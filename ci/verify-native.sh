@@ -55,7 +55,7 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
   [ -f "$source" ] || die "MISSING_SOURCE: $source"
   git ls-files --error-unmatch "$source" >/dev/null || die "UNTRACKED_SOURCE"
   if grep -Fxq "$source" "$tmp/seen" 2>/dev/null; then die "DUPLICATE_CASE: $source"; fi
-  printf '%s\\n' "$source" >> "$tmp/seen"
+  printf '%s\n' "$source" >> "$tmp/seen"
   case "$source|$expected" in
     "tests/guest/isolation_policy.ores|browser:isolation-policy-ok") ;;
     "src/browser/tab_epoch.ores|browser:tab-epoch-ok") ;;
