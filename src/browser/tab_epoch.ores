@@ -4,20 +4,23 @@
 define actor TabEpochActor as
   state { last_epoch: int = 0; }
 
-  receive(ActorMail<int> mail): void {
-    if mail.value == -1; do
-      self.send(0);
-      self.end();
-      return;
-    fi
-    val candidate = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  apply_epoch(candidate: int): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       if candidate > 0 && candidate > s.last_epoch; do
         s.last_epoch = candidate;
         return candidate;
       fi
       return -1;
     });
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == -1; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val reply = self.apply_epoch(mail.value);
     self.send(reply);
     return;
   }
