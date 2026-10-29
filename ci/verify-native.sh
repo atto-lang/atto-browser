@@ -98,4 +98,4 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
 done < ci/native-cases.txt
 [ "$count" -eq 14 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
 [ "$(wc -l < "$tmp/seen" | tr -d ' ')" -eq 14 ] || die "NATIVE_DUPLICATE_COVERAGE"
-printf 'NATIVE_ACCEPTANCE_PASS count=%s source_sha=%s compiler_sha256=%s\n' "$count" "$head" "$actual"
+printf 'NATIVE_ACCEPTANCE_PASS count=%s source_sha=%s checkout_sha=%s tree_sha=%s compiler_sha256=%s\n' "$count" "$EXPECTED_SOURCE_SHA" "$head" "$tree" "$actual"
