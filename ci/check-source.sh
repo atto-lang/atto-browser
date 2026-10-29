@@ -43,8 +43,16 @@ grep -Fq 'FAIL:sibling-origin-read' tests/guest/site_tenant_policy.ores
 for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     src/browser/renderer_supervisor.ores src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores src/workers/lifecycle.ores; do
-  grep -Fq '  state {' "$actor"
+  [ "$(grep -Ec '^  state \{' "$actor")" -eq 1 ] || {
+    echo "INVALID_ACTOR_STATE_SCHEMA: $actor" >&2
+    exit 1
+  }
   grep -Fq 'self.handle_state(critical |s|' "$actor"
+  if grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' "$actor" |
+       grep -Ev 'self\.(send|end|handle_state)\('; then
+    echo "DIRECT_ACTOR_FIELD_ACCESS: $actor" >&2
+    exit 1
+  fi
   if grep -Eq 'self\.[A-Za-z_][A-Za-z_0-9]*[[:space:]]*=' "$actor"; then
     echo "DIRECT_ACTOR_FIELD_WRITE: $actor" >&2
     exit 1
