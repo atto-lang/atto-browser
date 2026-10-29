@@ -15,7 +15,11 @@ c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
 "$tmp/abi-wire"
-echo "ABI_LAYOUT_AND_WIRE_ADVERSARIAL_EXECUTED"
+# Compile/link integration acceptance, but NEVER run without pinned real
+# Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/backend_integration.c -ldl -o "$tmp/backend-ffi"
+echo "ABI_LAYOUT_AND_WIRE_ADVERSARIAL_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
 for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
     desktop/qt/UiBridge.cpp desktop/qt/Main.qml \
     desktop/qt/CMakeLists.txt include/ores_browser_ui_abi_v1.h; do
