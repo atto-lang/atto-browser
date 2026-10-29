@@ -183,7 +183,8 @@ UiBridge::UiBridge(QObject *parent) : QObject(parent) {}
 UiBridge::~UiBridge() {
     if (!worker_) return;
     if (thread_.isRunning()) {
-        QMetaObject::invokeMethod(worker_, &BackendWorker::shutdown,
+        auto *worker = worker_;
+        QMetaObject::invokeMethod(worker, [worker] { worker->shutdown(); },
                                   Qt::BlockingQueuedConnection);
         thread_.quit();
         thread_.wait();
@@ -228,7 +229,8 @@ void UiBridge::start() {
         emit statusChanged();
     });
     thread_.start();
-    QMetaObject::invokeMethod(worker_, &BackendWorker::start,
+    auto *worker = worker_;
+    QMetaObject::invokeMethod(worker, [worker] { worker->start(); },
                               Qt::QueuedConnection);
 }
 void UiBridge::submit(uint32_t op, const QString &id,
