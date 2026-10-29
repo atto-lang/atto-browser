@@ -100,7 +100,8 @@ https://developer.mozilla.org/en-US/docs/Web/API/Push_API .
   budgets, memory, queued fetch/push jobs, update rate. Fail closed on
   generation mismatch, scope/partition mismatch, revoked registration.
 - Push subscriptions/keys stored encrypted in profile partition and
-  never logged. Site-data deletion invalidates subscriptions and queued
+  never logged. Bind push subscriptions to the registration epoch (stable
+  across worker script updates), not to each active script version. Site-data deletion invalidates subscriptions and queued
   events. Private session data cannot survive closing its session.
 - Worker fetch routing compares the *controlled client origin* with the
   registration, not the remote resource URL: a valid service worker can

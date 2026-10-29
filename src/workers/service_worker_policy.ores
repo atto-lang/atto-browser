@@ -90,22 +90,25 @@ pub fnc may_wake_worker_for_event(int reg_tenant, int event_tenant,
 
 // Push endpoint is a capability and must be bound to this partition and
 // registration; never use an endpoint or encryption key sent by a renderer
-// as independent authority. Rate and OS notification gates apply separately.
+// as independent authority. Registration epoch is stable across script updates
+// and changes upon registration replacement/revocation. A push subscription
+// must not break just because an active worker script version was updated.
+// Rate and OS notification gates apply separately.
 pub fnc may_receive_push(int request_tenant, int worker_tenant,
     int subscription_storage_key, int worker_storage_key,
-    int subscription_generation, int worker_generation,
+    int subscription_registration_epoch, int current_registration_epoch,
     bool subscription_valid, bool active_registration,
     bool push_budget_available): bool {
   if request_tenant <= 0 || worker_tenant <= 0; do return false; fi
   if subscription_storage_key <= 0 || worker_storage_key <= 0; do
     return false;
   fi
-  if subscription_generation <= 0 || worker_generation <= 0; do
+  if subscription_registration_epoch <= 0 || current_registration_epoch <= 0; do
     return false;
   fi
   if !subscription_valid || !active_registration ||
      !push_budget_available; do return false; fi
   return request_tenant == worker_tenant &&
          subscription_storage_key == worker_storage_key &&
-         subscription_generation == worker_generation;
+         subscription_registration_epoch == current_registration_epoch;
 }
