@@ -136,6 +136,9 @@ pub fnc may_commit_frame_navigation(
 pub fnc may_route_frame_message(
     int source_window, int target_window,
     int source_frame, int target_frame,
+    int presented_source_document_epoch, int live_source_document_epoch,
+    int presented_source_renderer_generation,
+    int live_source_renderer_generation,
     int expected_target_origin, int live_target_origin,
     int presented_target_document_epoch, int live_target_document_epoch,
     int presented_target_renderer_generation,
@@ -144,6 +147,10 @@ pub fnc may_route_frame_message(
     bool target_proxy_authorized, bool broker_authenticated): bool {
   if source_window <= 0 || target_window <= 0; do return false; fi
   if source_frame <= 0 || target_frame <= 0; do return false; fi
+  if presented_source_document_epoch <= 0 ||
+     live_source_document_epoch <= 0 ||
+     presented_source_renderer_generation <= 0 ||
+     live_source_renderer_generation <= 0; do return false; fi
   if expected_target_origin <= 0 || live_target_origin <= 0; do
     return false;
   fi
@@ -156,6 +163,9 @@ pub fnc may_route_frame_message(
     return false;
   fi
   return source_window == target_window &&
+         presented_source_document_epoch == live_source_document_epoch &&
+         presented_source_renderer_generation ==
+           live_source_renderer_generation &&
          expected_target_origin == live_target_origin &&
          presented_target_document_epoch == live_target_document_epoch &&
          presented_target_renderer_generation ==
@@ -201,12 +211,14 @@ pub fnc may_retire_unused_renderer(
     int registry_window, int renderer_window,
     int renderer_generation, int presented_generation,
     int live_frame_references, int in_flight_surface_references,
+    int in_flight_ipc_references,
     bool registry_quiescent, bool backend_cleanup_complete): bool {
   if registry_window <= 0 || renderer_window <= 0; do return false; fi
   if renderer_generation <= 0 || presented_generation <= 0; do
     return false;
   fi
-  if live_frame_references != 0 || in_flight_surface_references != 0; do
+  if live_frame_references != 0 || in_flight_surface_references != 0 ||
+     in_flight_ipc_references != 0; do
     return false;
   fi
   if !registry_quiescent || !backend_cleanup_complete; do return false; fi

@@ -92,22 +92,22 @@ pub routine main(): void {
   if may_commit_frame_navigation(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, false, true); do
     stdio.stdout.write("FAIL:unadmitted-navigation"); return;
   fi
-  if !may_route_frame_message(1, 1, 101, 102, 300, 300, 5, 5, 4, 4, true, true, true, true); do
+  if !may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, true, true); do
     stdio.stdout.write("FAIL:cross-site-postmessage"); return;
   fi
-  if may_route_frame_message(1, 1, 101, 102, 300, 301, 5, 5, 4, 4, true, true, true, true); do
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 301, 5, 5, 4, 4, true, true, true, true); do
     stdio.stdout.write("FAIL:wrong-target-origin"); return;
   fi
-  if may_route_frame_message(1, 1, 101, 102, 300, 300, 4, 5, 4, 4, true, true, true, true); do
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 4, 5, 4, 4, true, true, true, true); do
     stdio.stdout.write("FAIL:stale-target-document"); return;
   fi
-  if may_route_frame_message(1, 1, 101, 102, 300, 300, 5, 5, 3, 4, true, true, true, true); do
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 3, 4, true, true, true, true); do
     stdio.stdout.write("FAIL:stale-message-renderer"); return;
   fi
-  if may_route_frame_message(1, 1, 101, 102, 300, 300, 5, 5, 4, 4, true, true, false, true); do
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, false, true); do
     stdio.stdout.write("FAIL:untrusted-proxy"); return;
   fi
-  if may_route_frame_message(1, 1, 101, 102, 300, 300, 5, 5, 4, 4, true, true, true, false); do
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, true, false); do
     stdio.stdout.write("FAIL:spoofed-broker"); return;
   fi
   if !may_composite_frame_surface(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, true, true); do
@@ -125,23 +125,32 @@ pub routine main(): void {
   if may_composite_frame_surface(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, false, true); do
     stdio.stdout.write("FAIL:unverified-surface-bounds"); return;
   fi
-  if !may_retire_unused_renderer(1, 1, 4, 4, 0, 0, true, true); do
+  if !may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 0, true, true); do
     stdio.stdout.write("FAIL:drained-renderer"); return;
   fi
-  if may_retire_unused_renderer(1, 1, 4, 4, 1, 0, true, true); do
+  if may_retire_unused_renderer(1, 1, 4, 4, 1, 0, 0, true, true); do
     stdio.stdout.write("FAIL:live-frame-retirement"); return;
   fi
-  if may_retire_unused_renderer(1, 1, 4, 4, 0, 1, true, true); do
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 1, 0, true, true); do
     stdio.stdout.write("FAIL:inflight-surface-retirement"); return;
   fi
-  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, false, true); do
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 0, false, true); do
     stdio.stdout.write("FAIL:nonquiescent-retirement"); return;
   fi
-  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, true, false); do
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 0, true, false); do
     stdio.stdout.write("FAIL:unfinalized-retirement"); return;
   fi
-  if may_retire_unused_renderer(1, 1, 3, 4, 0, 0, true, true); do
+  if may_retire_unused_renderer(1, 1, 3, 4, 0, 0, 0, true, true); do
     stdio.stdout.write("FAIL:stale-retire"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 5, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-sender-document"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 7, 8, 300, 300, 5, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-sender-process"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 1, true, true); do
+    stdio.stdout.write("FAIL:inflight-ipc-retirement"); return;
   fi
   stdio.stdout.write("browser:frame-routing-policy-ok");
   return;

@@ -46,7 +46,8 @@ for fn in may_bind_frame_to_renderer may_reuse_renderer_for_frames \
   grep -Fq "pub fnc $fn(" src/browser/frame_routing_policy.ores
 done
 for term in cross-site-postmessage stale-target-document \
-    cross-tab-child stale-frame-surface inflight-surface-retirement; do
+    cross-tab-child stale-frame-surface inflight-surface-retirement \
+    stale-sender-document stale-sender-process inflight-ipc-retirement; do
   grep -Fq "FAIL:$term" tests/guest/frame_routing_policy.ores
 done
 grep -Fq 'define actor RendererSupervisorActor' src/browser/renderer_supervisor.ores

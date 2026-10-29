@@ -115,7 +115,7 @@ reuse is an isolation guarantee between sibling origins.
   navigation, brokered cross-site messaging, surface presentation and
   renderer retirement. Caller-provided IDs and Boolean flags are
   fixture values, NOT authenticated capabilities.
-- `tests/guest/frame_routing_policy.ores`: 45 positive/negative policy
+- `tests/guest/frame_routing_policy.ores`: 48 positive/negative policy
   vectors. The native compiler must run these for executable evidence.
 - `src/browser/window_frame_graph.ores`: Oreslang actor fixture with
   single sealed `state { ... }` and `handle_state(critical |s| -> ...)`

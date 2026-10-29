@@ -82,7 +82,7 @@ have real executed evidence rather than zero-step runner failures.
 ## Follow-on: multi-renderer tabs / frame registry slice
 
 The new `src/browser/frame_routing_policy.ores` and
-`tests/guest/frame_routing_policy.ores` define 45 positive/negative
+`tests/guest/frame_routing_policy.ores` define 48 positive/negative
 frame routing policy vectors. The new
 `src/browser/window_frame_graph.ores` sealed-state actor
 is a two-tab, three-frame, two-renderer fixture showing cross-site OOPIF
