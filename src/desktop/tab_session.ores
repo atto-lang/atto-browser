@@ -1,41 +1,41 @@
-// One long-lived actor per tab: first native history navigation proof.
-// The trusted window supervisor will own the unbounded tab strip and URLs.
-// These string messages are LOCAL TEST COMMANDS, not production IPC.
+// Per-tab native history-state prototype. Each actor has a single state
+// field; critical handle_state transactions cannot suspend or send IPC.
+// Local fixture messages are not production authenticated commands.
 define actor TabSessionActor as
-  let int back_depth = 0;
-  let int forward_depth = 0;
+  state {
+    back_depth: int = 0;
+    forward_depth: int = 0;
+  }
 
   receive(ActorMail<String> mail): void {
-    if mail.value == "navigate"; do
-      if self.back_depth >= 1024; do
-        self.send("history-full"); return;
-      fi
-      self.back_depth = self.back_depth + 1;
-      self.forward_depth = 0;
-      self.send("navigated"); return;
-    fi
-    if mail.value == "back"; do
-      if self.back_depth <= 1; do
-        self.send("no-back"); return;
-      fi
-      self.back_depth = self.back_depth - 1;
-      self.forward_depth = self.forward_depth + 1;
-      self.send("back"); return;
-    fi
-    if mail.value == "forward"; do
-      if self.forward_depth <= 0; do
-        self.send("no-forward"); return;
-      fi
-      self.back_depth = self.back_depth + 1;
-      self.forward_depth = self.forward_depth - 1;
-      self.send("forward"); return;
-    fi
     if mail.value == "close"; do
       self.send("closed");
       self.end();
       return;
     fi
-    self.send("rejected");
+    val operation = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      if operation == "navigate"; do
+        if s.back_depth >= 1024; do return "history-full"; fi
+        s.back_depth = s.back_depth + 1;
+        s.forward_depth = 0;
+        return "navigated";
+      fi
+      if operation == "back"; do
+        if s.back_depth <= 1; do return "no-back"; fi
+        s.back_depth = s.back_depth - 1;
+        s.forward_depth = s.forward_depth + 1;
+        return "back";
+      fi
+      if operation == "forward"; do
+        if s.forward_depth <= 0; do return "no-forward"; fi
+        s.back_depth = s.back_depth + 1;
+        s.forward_depth = s.forward_depth - 1;
+        return "forward";
+      fi
+      return "rejected";
+    });
+    self.send(reply);
     return;
   }
 end
