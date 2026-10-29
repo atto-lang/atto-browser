@@ -41,9 +41,18 @@ integer fixture protocol to the privileged Qt UI.
 3. `sh ci/verify-native.sh`: requires a pinned native Oreslang compiler,
    clean exact Git head, real `--check` and execution with byte-exact
    output on all twelve fixtures. Never substitute a shell/Node/Python simulator.
-4. A real Qt 6.5+ GUI build and desktop smoke must prove two tabs with live
+4. `ci/verify-backend-ffi.sh` requires an absolute app-owned native shared
+   library path, independently pinned `ORES_BROWSER_BACKEND_SHA256`, exact
+   `EXPECTED_SOURCE_SHA`, and a clean checkout. It compiles and runs
+   `tests/abi/backend_integration.c` against the **real exported symbols**:
+   opens a fresh session, creates two tabs, selects and closes a tab, rejects
+   a stale handle without mutating state, and checks bounded canonical
+   snapshots and revision consistency. The static source audit compiles this
+   probe but does **not** run it with a fake backend. The probe has NOT
+   passed because the compiled Oreslang backend does not exist yet.
+5. A real Qt 6.5+ GUI build and desktop smoke must prove two tabs with live
    backend receipts, stale command denial and clean bounded shutdown.
-5. Sandboxed renderer subprocesses require OS-level isolation, brokered
+6. Sandboxed renderer subprocesses require OS-level isolation, brokered
    authenticated bounded IPC, collision-proof generation fencing, crash tests
    and resource quotas. An in-process IsolateVM is not a secure process.
 
