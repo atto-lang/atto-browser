@@ -7,10 +7,16 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || die "NOT_EXECUTED: git unavailable"
 head="$(git rev-parse --verify HEAD)" || die "NOT_EXECUTED: missing HEAD"
 [ "${#head}" -eq 40 ] || die "NOT_EXECUTED: invalid source SHA"
-[ -z "${EXPECTED_SOURCE_SHA:-}" ] || [ "$EXPECTED_SOURCE_SHA" = "$head" ] ||
-  die "NOT_EXECUTED: expected source SHA mismatch"
-[ -z "$(git status --porcelain --untracked-files=normal -- src/ tests/ ci/native-cases.txt)" ] ||
-  die "NOT_EXECUTED: source checkout dirty"
+[ -n "${EXPECTED_SOURCE_SHA:-}" ] || die "NOT_EXECUTED: source SHA pin required"
+tree="$(git rev-parse --verify 'HEAD^{tree}')" || die "NOT_EXECUTED: missing tree"
+if [ "$EXPECTED_SOURCE_SHA" != "$head" ]; then
+  [ -n "${EXPECTED_SOURCE_TREE:-}" ] && [ "$EXPECTED_SOURCE_TREE" = "$tree" ] ||
+    die "NOT_EXECUTED: mirror tree must equal approved source tree"
+  [ "${EXPECTED_CHECKOUT_SHA:-}" = "$head" ] ||
+    die "NOT_EXECUTED: mirror checkout commit pin required"
+fi
+[ -z "$(git status --porcelain --untracked-files=all)" ] ||
+  die "NOT_EXECUTED: repository checkout dirty"
 case "${ORESLANG_BIN:-}" in /*) ;; *) die "NOT_EXECUTED: absolute ORESLANG_BIN required" ;; esac
 [ -x "$ORESLANG_BIN" ] || die "NOT_EXECUTED: compiler missing"
 case "${ORESLANG_COMPILER_SHA256:-}" in
