@@ -64,8 +64,11 @@ to it as though it were an isolation security guarantee.
 ## Phased implementation
 
 1. CURRENT: pure Oreslang policy gates, native Oreslang test vectors,
+   a two-tab actor-state control prototype (not C ABI export),
    actor epoch ordering demo, static workflow and native-only test harness.
-2. Trusted actor-based BrowserSupervisor, canonical origin service and
+2. Expand the two-slot native BrowserSupervisor control fixture into a
+   real 64-tab actor with stable generation-fenced tab identities, then
+   implement the trusted canonical origin service and
    process registry, typed capability grants, page/tab/frame identity and
    pending/committed navigation transitions. No real web content before this.
 3. OS-sandboxed renderer subprocesses, browser/renderer authenticated bounded
@@ -82,7 +85,7 @@ to it as though it were an isolation security guarantee.
 The source audit is static and cannot establish real guest execution.
 The native shell harness requires a trusted external Oreslang binary with
 SHA256 pin, exact clean Git checkout, compiler check and byte-exact stdout
-for all eleven manifested native guest fixtures. A queued or zero-step GitHub Actions job is
+for all twelve manifested native guest fixtures. A queued or zero-step GitHub Actions job is
 **NOT_EXECUTED**, not pass/fail execution evidence. This project has not yet
 proved compilation or execution of these guests, nor any real HTML navigation.
 
