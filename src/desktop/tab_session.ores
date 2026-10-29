@@ -7,14 +7,8 @@ define actor TabSessionActor as
     forward_depth: int = 0;
   }
 
-  receive(ActorMail<String> mail): void {
-    if mail.value == "close"; do
-      self.send("closed");
-      self.end();
-      return;
-    fi
-    val operation = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  handle_operation(operation: String): String using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       if operation == "navigate"; do
         if s.back_depth >= 1024; do return "history-full"; fi
         s.back_depth = s.back_depth + 1;
@@ -35,6 +29,16 @@ define actor TabSessionActor as
       fi
       return "rejected";
     });
+  }
+
+  receive(ActorMail<String> mail): void {
+    if mail.value == "close"; do
+      self.send("closed");
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
     self.send(reply);
     return;
   }
