@@ -118,6 +118,13 @@ Source-shape checks now reject direct actor-field access and require one
 state schema in each actor. The manifest tracks twelve actual guest programs.
 Native Oreslang compilation/execution is still **NOT_EXECUTED**; the
 current LLVM exporter does not yet supply the five linked browser symbols.
+The new `tests/abi/backend_integration.c` is a **real-backend-only**
+integration gate, not a mock implementation: the C binary loads the five
+Oreslang exports and exercises two tabs and stale-handle rejection.
+`ci/verify-backend-ffi.sh` refuses to run until an absolute native
+library path, verified SHA256 and exact repository source SHA are supplied.
+This test has **NOT_EXECUTED** because a linked Oreslang backend is missing.
+
 See [Milestone 1 evidence and next gates](docs/MILESTONE1.md).
 
 ## Next milestones
