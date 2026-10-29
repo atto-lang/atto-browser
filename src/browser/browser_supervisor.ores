@@ -1,0 +1,154 @@
+// BrowserSupervisorActor: first bounded native Oreslang tab-control slice.
+// Exactly ONE actor state field. The fixed two-slot capacity exists only so
+// current compiler/runtime limitations can be exercised without inventing
+// unsupported dynamic-collection APIs. Production target remains 64 tabs.
+//
+// Fixture-only INTEGER transport, never untrusted renderer or Qt IPC:
+//   1 create, 2 next, 3 previous, 4 count, 5 revision, 9 stop
+//   1000 + tab_id select by stable id, -1000 - tab_id close by stable id.
+// Production FFI MUST use typed OresBrowserCommand plus authenticated,
+// generation-fenced session and tab handles. No navigation/OS sandbox here.
+define actor BrowserSupervisorActor as
+  state {
+    first_tab_id: int = 0;
+    second_tab_id: int = 0;
+    selected_tab_id: int = 0;
+    next_tab_id: int = 1;
+    revision: int = 1;
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 9; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      if operation == 1; do
+        if s.first_tab_id > 0 && s.second_tab_id > 0; do return -1; fi
+        // Never recycle a tab ID in this browser session.
+        val id = s.next_tab_id;
+        if id <= 0 || id >= 2147483647; do return -1; fi
+        s.next_tab_id = id + 1;
+        if s.first_tab_id == 0; do
+          s.first_tab_id = id;
+        else
+          s.second_tab_id = id;
+        fi
+        s.selected_tab_id = id;
+        s.revision = s.revision + 1;
+        return id;
+      fi
+      if operation == 2 || operation == 3; do
+        if s.first_tab_id == 0 && s.second_tab_id == 0; do return -1; fi
+        if s.first_tab_id > 0 && s.second_tab_id > 0; do
+          if s.selected_tab_id == s.first_tab_id; do
+            s.selected_tab_id = s.second_tab_id;
+          else
+            s.selected_tab_id = s.first_tab_id;
+          fi
+        else
+          if s.first_tab_id > 0; do
+            s.selected_tab_id = s.first_tab_id;
+          else
+            s.selected_tab_id = s.second_tab_id;
+          fi
+        fi
+        s.revision = s.revision + 1;
+        return s.selected_tab_id;
+      fi
+      if operation == 4; do
+        if s.first_tab_id > 0 && s.second_tab_id > 0; do return 2; fi
+        if s.first_tab_id > 0 || s.second_tab_id > 0; do return 1; fi
+        return 0;
+      fi
+      if operation == 5; do return s.revision; fi
+      if operation >= 1001; do
+        val wanted = operation - 1000;
+        if wanted != s.first_tab_id && wanted != s.second_tab_id; do
+          return -1;
+        fi
+        if wanted == s.selected_tab_id; do return wanted; fi
+        s.selected_tab_id = wanted;
+        s.revision = s.revision + 1;
+        return wanted;
+      fi
+      if operation <= -1001; do
+        val wanted = 0 - operation - 1000;
+        if wanted != s.first_tab_id && wanted != s.second_tab_id; do
+          return -1;
+        fi
+        if wanted == s.first_tab_id; do s.first_tab_id = 0; fi
+        if wanted == s.second_tab_id; do s.second_tab_id = 0; fi
+        if s.selected_tab_id == wanted; do
+          if s.first_tab_id > 0; do
+            s.selected_tab_id = s.first_tab_id;
+          else
+            s.selected_tab_id = s.second_tab_id;
+          fi
+        fi
+        s.revision = s.revision + 1;
+        return wanted;
+      fi
+      return -1;
+    });
+    // Actor output never occurs during a mutable state loan.
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val browser = await spawn BrowserSupervisorActor();
+  browser.send(1);
+  val a = (await browser.outputs.next()).value.unwrap();
+  browser.send(1);
+  val b = (await browser.outputs.next()).value.unwrap();
+  if a.value != 1 || b.value != 2; do
+    stdio.stdout.write("FAIL:two-independent-tab-ids"); return;
+  fi
+  browser.send(1);
+  val full = (await browser.outputs.next()).value.unwrap();
+  if full.value != -1; do
+    stdio.stdout.write("FAIL:bounded-capacity"); return;
+  fi
+  browser.send(1001);
+  val selected = (await browser.outputs.next()).value.unwrap();
+  if selected.value != 1; do
+    stdio.stdout.write("FAIL:select-first-tab"); return;
+  fi
+  browser.send(-1001);
+  val closed = (await browser.outputs.next()).value.unwrap();
+  if closed.value != 1; do
+    stdio.stdout.write("FAIL:close-first-tab"); return;
+  fi
+  browser.send(1001);
+  val stale = (await browser.outputs.next()).value.unwrap();
+  if stale.value != -1; do
+    stdio.stdout.write("FAIL:stale-tab-id"); return;
+  fi
+  browser.send(1);
+  val c = (await browser.outputs.next()).value.unwrap();
+  if c.value != 3; do
+    stdio.stdout.write("FAIL:nonrecycled-tab-id"); return;
+  fi
+  browser.send(4);
+  val count = (await browser.outputs.next()).value.unwrap();
+  if count.value != 2; do
+    stdio.stdout.write("FAIL:retained-second-tab"); return;
+  fi
+  browser.send(5);
+  val revision = (await browser.outputs.next()).value.unwrap();
+  if revision.value != 6; do
+    stdio.stdout.write("FAIL:monotonic-revisions"); return;
+  fi
+  browser.send(9);
+  val stopped = (await browser.outputs.next()).value.unwrap();
+  await browser.get_done();
+  if stopped.value != 0; do
+    stdio.stdout.write("FAIL:supervisor-stop"); return;
+  fi
+  stdio.stdout.write("browser:supervisor-tabs-ok");
+  return;
+}
