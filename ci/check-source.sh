@@ -67,7 +67,7 @@ for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     exit 1
   }
   if grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' "$actor" |
-       grep -Ev 'self\.(send|end|handle_state)\('; then
+       grep -Ev 'self\.(send|end|handle_state|handle_operation|apply_epoch)\('; then
     echo "DIRECT_ACTOR_FIELD_ACCESS: $actor" >&2
     exit 1
   fi
