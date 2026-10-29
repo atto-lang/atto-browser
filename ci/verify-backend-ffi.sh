@@ -8,9 +8,16 @@ command -v git >/dev/null 2>&1 || fail "git unavailable"
 command -v cc >/dev/null 2>&1 || fail "C compiler unavailable"
 head=$(git rev-parse --verify HEAD) || fail "no Git HEAD"
 [ "${#head}" -eq 40 ] || fail "invalid source SHA"
-[ "${EXPECTED_SOURCE_SHA:-}" = "$head" ] || fail "EXPECTED_SOURCE_SHA must pin exact head"
-[ -z "$(git status --porcelain --untracked-files=normal -- include/ tests/abi/ ci/verify-backend-ffi.sh)" ] ||
-  fail "ABI checkout dirty"
+[ -n "${EXPECTED_SOURCE_SHA:-}" ] || fail "source SHA pin required"
+tree=$(git rev-parse --verify 'HEAD^{tree}') || fail "source tree unavailable"
+if [ "$EXPECTED_SOURCE_SHA" != "$head" ]; then
+  [ -n "${EXPECTED_SOURCE_TREE:-}" ] && [ "$EXPECTED_SOURCE_TREE" = "$tree" ] ||
+    fail "mirror tree not verified against approved source"
+  [ "${EXPECTED_CHECKOUT_SHA:-}" = "$head" ] ||
+    fail "mirror checkout commit pin required"
+fi
+[ -z "$(git status --porcelain --untracked-files=all)" ] ||
+  fail "repository checkout dirty"
 case "${ORES_BROWSER_BACKEND_LIB:-}" in
   /*) ;;
   *) fail "absolute ORES_BROWSER_BACKEND_LIB required" ;;
