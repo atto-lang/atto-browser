@@ -1,0 +1,52 @@
+// Actor-first tab ordering prototype, not a renderer or authentication gate.
+// -1 is a fixture-only orderly shutdown request; positive epochs increase.
+define actor TabEpochActor as
+  let int last_epoch = 0;
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == -1; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    if mail.value > 0 && mail.value > self.last_epoch; do
+      self.last_epoch = mail.value;
+      self.send(mail.value);
+      return;
+    fi
+    self.send(-1);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val tab = await spawn TabEpochActor();
+  tab.send(3);
+  val accepted = (await tab.outputs.next()).value.unwrap();
+  if accepted.value != 3; do
+    stdio.stdout.write("FAIL:initial-epoch"); return;
+  fi
+  tab.send(2);
+  val older = (await tab.outputs.next()).value.unwrap();
+  if older.value != -1; do
+    stdio.stdout.write("FAIL:old-navigation"); return;
+  fi
+  tab.send(3);
+  val repeated = (await tab.outputs.next()).value.unwrap();
+  if repeated.value != -1; do
+    stdio.stdout.write("FAIL:duplicate-epoch"); return;
+  fi
+  tab.send(4);
+  val newer = (await tab.outputs.next()).value.unwrap();
+  if newer.value != 4; do
+    stdio.stdout.write("FAIL:new-navigation"); return;
+  fi
+  tab.send(-1);
+  val stopped = (await tab.outputs.next()).value.unwrap();
+  await tab.get_done();
+  if stopped.value != 0; do
+    stdio.stdout.write("FAIL:shutdown"); return;
+  fi
+  stdio.stdout.write("browser:tab-epoch-ok");
+  return;
+}

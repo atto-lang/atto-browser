@@ -1,0 +1,2 @@
+tests/guest/isolation_policy.ores|browser:isolation-policy-ok
+src/browser/tab_epoch.ores|browser:tab-epoch-ok

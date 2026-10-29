@@ -1,0 +1,18 @@
+name: Browser static source audit
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  static-source-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Source structure only (not native execution)
+        run: sh ci/check-source.sh
+      - name: Native harness shell syntax
+        run: sh -n ci/verify-native.sh
