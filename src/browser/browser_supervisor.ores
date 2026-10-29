@@ -17,14 +17,8 @@ define actor BrowserSupervisorActor as
     revision: int = 1;
   }
 
-  receive(ActorMail<int> mail): void {
-    if mail.value == 9; do
-      self.send(0);
-      self.end();
-      return;
-    fi
-    val operation = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  handle_operation(operation: int): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       if operation == 1; do
         if s.revision >= 2147483647; do return -1; fi
         if s.first_tab_id > 0 && s.second_tab_id > 0; do return -1; fi
@@ -98,6 +92,16 @@ define actor BrowserSupervisorActor as
       fi
       return -1;
     });
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 9; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
     // Actor output never occurs during a mutable state loan.
     self.send(reply);
     return;
