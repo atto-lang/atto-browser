@@ -1,4 +1,4 @@
-#include "ores_browser_ui_abi_v1.h"
+#include "ores_browser_wire_validate_v1.h"
 #include <type_traits>
 #include <cstddef>
 static_assert(ORES_BROWSER_UI_ABI_VERSION == 1u);
@@ -14,5 +14,9 @@ int main() {
     OresBrowserConfig config{};
     config.struct_size = sizeof(config);
     config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
-    return (config.abi_version == 1u) ? 0 : 1;
+    OresBrowserCommand cmd{};
+    cmd.struct_size = sizeof(cmd);
+    cmd.operation = ORES_BROWSER_CMD_NEW_TAB;
+    return config.abi_version == 1u &&
+           ores_browser_validate_command_v1(&cmd) ? 0 : 1;
 }

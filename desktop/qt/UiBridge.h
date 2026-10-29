@@ -5,6 +5,7 @@
 #include <QLibrary>
 #include <QString>
 #include <QTimer>
+#include <QByteArray>
 #include <memory>
 #include "ores_browser_ui_abi_v1.h"
 
@@ -33,6 +34,7 @@ private:
     OresBrowserHandle *handle_ = nullptr;
     uint64_t last_revision_ = 0;
     bool have_revision_ = false;
+    QByteArray last_wire_;
     uint32_t (*abi_)() = nullptr;
     int32_t (*open_)(const OresBrowserConfig*, OresBrowserHandle**) = nullptr;
     int32_t (*dispatch_)(OresBrowserHandle*, const OresBrowserCommand*) = nullptr;

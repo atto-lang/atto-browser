@@ -5,6 +5,10 @@
 #include <QVariantMap>
 #include <QByteArray>
 #include <QSet>
+#include <QFileInfo>
+#include <QDebug>
+#include "ores_browser_wire_validate_v1.h"
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -28,15 +32,56 @@ bool checkedUtf8(const char (&bytes)[N], QString &target) {
 bool validStatus(int32_t status) {
     return status >= ORES_BROWSER_OK && status <= ORES_BROWSER_INTERNAL;
 }
+// Security-critical browser-chrome URL text may not contain direction
+// overrides, isolate controls, or invisible ASCII/C1 control characters.
+bool safeChromeUrl(const QString &value) {
+    for (QChar c : value) {
+        const ushort u = c.unicode();
+        if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
+            (u >= 0x202au && u <= 0x202eu) ||
+            (u >= 0x2066u && u <= 0x2069u)) return false;
+    }
+    return true;
+}
+// Webpage titles are never authority. Replace dangerous controls for
+// display rather than allowing untrusted page content to kill the browser.
+QString safeDisplayTitle(QString value) {
+    for (qsizetype i = 0; i < value.size(); ++i) {
+        const ushort u = value.at(i).unicode();
+        if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
+            (u >= 0x202au && u <= 0x202eu) ||
+            (u >= 0x2066u && u <= 0x2069u)) {
+            value[i] = QChar(0xfffdu);
+        }
+    }
+    return value;
+}
 } // namespace
 
 void BackendWorker::start() {
     if (handle_ || lib_) return;
     // The release packager must code-sign this *app-bundled* library.
     // No current-working-directory, environment or user-supplied DLL paths.
-    lib_ = std::make_unique<QLibrary>(
-        QDir(QCoreApplication::applicationDirPath())
-            .absoluteFilePath(QStringLiteral("ores_browser_backend")));
+    const QDir appDir(QCoreApplication::applicationDirPath());
+#if defined(Q_OS_WIN)
+    const QString libraryName = QStringLiteral("ores_browser_backend.dll");
+#elif defined(Q_OS_MACOS)
+    const QString libraryName = QStringLiteral("libores_browser_backend.dylib");
+#else
+    const QString libraryName = QStringLiteral("libores_browser_backend.so");
+#endif
+    const QFileInfo libraryFile(appDir.filePath(libraryName));
+    const QString canonicalDir = appDir.canonicalPath();
+    // No implicit prefix/suffix probing, symlinked library redirection,
+    // non-file loads, or environment-selected library location.
+    if (canonicalDir.isEmpty() || !libraryFile.isFile() ||
+        libraryFile.isSymLink() ||
+        libraryFile.canonicalPath() != canonicalDir) {
+        failClosed(QStringLiteral("Packaged Oreslang backend missing or unsafe path"));
+        return;
+    }
+    lib_ = std::make_unique<QLibrary>(libraryFile.canonicalFilePath());
+    lib_->setLoadHints(QLibrary::ResolveAllSymbolsHint);
     if (!lib_->load()) {
         failClosed(QStringLiteral("Oreslang backend library unavailable. "
                                   "Desktop shell is offline; no C++ fallback."));
@@ -84,6 +129,9 @@ void BackendWorker::shutdown() {
     snapshot_ = nullptr;
     close_ = nullptr;
     if (lib_) { lib_->unload(); lib_.reset(); }
+    have_revision_ = false;
+    last_revision_ = 0;
+    last_wire_.clear();
 }
 void BackendWorker::submit(uint32_t op, const QString &id,
                            const QString &generation, const QString &url) {
@@ -117,6 +165,10 @@ void BackendWorker::submit(uint32_t op, const QString &id,
         std::memcpy(command.url, value.constData(), size_t(value.size()));
         command.url[value.size()] = '\0';
     }
+    if (!ores_browser_validate_command_v1(&command)) {
+        emit rejected(QStringLiteral("Malformed UI command wire record"));
+        return;
+    }
     const int32_t status = dispatch_(handle_, &command);
     if (!validStatus(status)) {
         failClosed(QStringLiteral("Invalid Oreslang command status"));
@@ -135,15 +187,19 @@ void BackendWorker::readSnapshot() {
     view->abi_version = ORES_BROWSER_UI_ABI_VERSION;
     const int32_t status = snapshot_(handle_, view.get());
     if (status != ORES_BROWSER_OK ||
-        view->struct_size != sizeof(*view) ||
-        view->abi_version != ORES_BROWSER_UI_ABI_VERSION ||
-        view->tab_count > ORES_BROWSER_MAX_TABS ||
-        view->reserved != 0 ||
-        (have_revision_ && view->revision < last_revision_)) {
+        !ores_browser_validate_snapshot_v1(view.get(), last_revision_,
+                                            have_revision_ ? 1 : 0)) {
         failClosed(QStringLiteral("Invalid Oreslang backend snapshot"));
         return;
     }
-    if (have_revision_ && last_revision_ == view->revision) return;
+    if (have_revision_ && last_revision_ == view->revision) {
+        if (last_wire_.size() != static_cast<qsizetype>(sizeof(*view)) ||
+            std::memcmp(last_wire_.constData(), view.get(),
+                        sizeof(*view)) != 0) {
+            failClosed(QStringLiteral("Snapshot changed without revision increment"));
+        }
+        return;
+    }
     QVariantList tabs;
     QString activeId, activeGeneration, activeUrl;
     bool canBack = false, canForward = false;
@@ -169,7 +225,10 @@ void BackendWorker::readSnapshot() {
         const QString generation = QString::number(t.generation);
         record.insert(QStringLiteral("id"), tabId);
         record.insert(QStringLiteral("generation"), generation);
-        record.insert(QStringLiteral("title"), title);
+        if (!safeChromeUrl(displayUrl)) {
+            failClosed(QStringLiteral("Unsafe browser-chrome URL text")); return;
+        }
+        record.insert(QStringLiteral("title"), safeDisplayTitle(title));
         record.insert(QStringLiteral("url"), displayUrl);
         record.insert(QStringLiteral("active"), t.active != 0);
         record.insert(QStringLiteral("loading"), t.loading != 0);
@@ -186,6 +245,8 @@ void BackendWorker::readSnapshot() {
     if (activeCount > 1 || (view->tab_count > 0 && activeCount != 1)) {
         failClosed(QStringLiteral("Invalid selected-tab count")); return;
     }
+    last_wire_ = QByteArray(reinterpret_cast<const char*>(view.get()),
+                            static_cast<qsizetype>(sizeof(*view)));
     last_revision_ = view->revision;
     have_revision_ = true;
     emit ready(tabs, activeId, activeGeneration, activeUrl, canBack, canForward);
@@ -196,10 +257,16 @@ UiBridge::~UiBridge() {
     if (!worker_) return;
     if (thread_.isRunning()) {
         auto *worker = worker_;
-        QMetaObject::invokeMethod(worker, [worker] { worker->shutdown(); },
-                                  Qt::BlockingQueuedConnection);
-        thread_.quit();
-        thread_.wait();
+        QMetaObject::invokeMethod(worker, [worker, this] {
+            worker->shutdown();
+            thread_.quit();
+        }, Qt::QueuedConnection);
+        // A wedged FFI must never freeze the privileged window on shutdown.
+        // Process termination is safer than forcibly killing a live QThread.
+        if (!thread_.wait(3000)) {
+            qCritical("Oreslang FFI did not quiesce; terminating process");
+            std::_Exit(70);
+        }
     }
 }
 void UiBridge::start() {

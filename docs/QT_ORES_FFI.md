@@ -162,3 +162,40 @@ References:
 - Qt: https://doc.qt.io/qt-6/qtqml-modules-cmake-integration.html
 - Qt: https://doc.qt.io/qt-6/qtqml-cppintegration-exposecppattributes.html
 - Qt: https://doc.qt.io/qt-6/qquickwindow.html
+
+## FFI hardening audit (2026-10-29)
+
+The UI bridge additionally enforces:
+
+- **Strict load path:** one explicitly named dynamic library per desktop OS,
+  regular file beneath the canonical application directory, no symlink at the
+  selected library entry, and no implicit QLibrary suffix/probing fallback.
+  This is *not* code-signature verification, atomic no-TOCTOU validation, or
+  protection from malicious transitive dynamic library dependencies; release
+  packaging must verify every code object and directory trust boundary.
+- **Portable value validation:** `ores_browser_wire_validate_v1.h` checks
+  struct sizes, versions, operation range, canonical command byte fields,
+  nonzero revision, one active tab, unique live tab IDs, string NUL padding,
+  booleans and zeroed unused tab slots. Qt also checks strict UTF-8 and
+  rejects bidirectional control characters in security-sensitive URL display.
+- **Same-revision immutability:** once a revision is observed, returning a
+  changed snapshot with the same revision disconnects the backend rather
+  than silently keeping the previous view.
+- **Untrusted page titles are plain text:** dangerous control characters in
+  tab titles are replaced for display and tab labels cannot interpret HTML
+  markup or load remote rich-text images.
+- **Shutdown fail-stop:** queued teardown is allowed three seconds; if native
+  FFI refuses to quiesce, the entire shell terminates with exit code 70
+  rather than forcibly killing the Qt thread or hanging indefinitely.
+  This is deliberately a stopgap. In a production browser, privileged UI
+  and potentially faulty or untrusted backends require separately supervised
+  OS processes, bounded authenticated IPC, and recoverable cancellation.
+- The `tests/abi/wire_adversarial.c` suite exercises the portable validator
+  against malformed snapshots and commands (real C source execution) without
+  pretending to execute Oreslang guests.
+
+**Status:** The C value validator is a defensive FFI adapter component, not a
+replacement Oreslang backend. All tenant, origin, cookie, service-worker,
+notification and tab state remains Oreslang-owned. Neither validation nor the
+current stub UI establishes a browser sandbox. The backend C exports and Qt
+GUI compilation remain independent acceptance gates.

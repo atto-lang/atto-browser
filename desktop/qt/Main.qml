@@ -104,6 +104,7 @@ ApplicationWindow {
                                         text: itemTab.view.title.length > 0 ?
                                                   itemTab.view.title : "New tab"
                                         color: "#f1f5f9"
+                                        textFormat: Text.PlainText
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
@@ -229,6 +230,7 @@ ApplicationWindow {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.fillWidth: true
                     text: BrowserBackend.statusMessage
+                    textFormat: Text.PlainText
                     color: "#fca5a5"
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter

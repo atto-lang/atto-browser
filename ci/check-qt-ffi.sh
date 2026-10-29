@@ -12,7 +12,10 @@ c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/header_smoke.cpp -o "$tmp/abi-cpp"
 "$tmp/abi-c"
 "$tmp/abi-cpp"
-echo "ABI_LAYOUT_EXECUTED_C_AND_CPP"
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
+"$tmp/abi-wire"
+echo "ABI_LAYOUT_AND_WIRE_ADVERSARIAL_EXECUTED"
 for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
     desktop/qt/UiBridge.cpp desktop/qt/Main.qml \
     desktop/qt/CMakeLists.txt include/ores_browser_ui_abi_v1.h; do
@@ -23,6 +26,12 @@ grep -Fq 'qt_add_qml_module(' desktop/qt/CMakeLists.txt
 grep -Fq 'Qt::QueuedConnection' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
+grep -Fq 'ores_browser_validate_snapshot_v1' desktop/qt/UiBridge.cpp
+grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
+grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
+grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
+grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
+grep -Fq 'textFormat: Text.PlainText' desktop/qt/Main.qml
 if grep -Eiq '(WebEngineView|import QtWebEngine|QtWebView|WKWebView|WebView2|Electron)' desktop/qt/Main.qml; then
   echo "FORBIDDEN_EMBEDDED_WEBVIEW" >&2
   exit 1
