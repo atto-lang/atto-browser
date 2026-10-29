@@ -71,7 +71,7 @@ to it as though it were an isolation security guarantee.
 The source audit is static and cannot establish real guest execution.
 The native shell harness requires a trusted external Oreslang binary with
 SHA256 pin, exact clean Git checkout, compiler check and byte-exact stdout
-for the two native guest fixtures. A queued or zero-step GitHub Actions job is
+for all nine manifested native guest fixtures. A queued or zero-step GitHub Actions job is
 **NOT_EXECUTED**, not pass/fail execution evidence. This project has not yet
 proved compilation or execution of these guests, nor any real HTML navigation.
 
