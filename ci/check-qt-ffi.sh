@@ -1,5 +1,5 @@
 #!/bin/sh
-# C/C++ syntax-only, not a Qt build and NOT a native Oreslang guest run.
+# Compiles and executes portable C/C++ ABI probes; NOT a Qt build or Oreslang guest run.
 set -eu
 cd "$(dirname "$0")/.."
 command -v cc >/dev/null 2>&1 || { echo "NO_C_COMPILER" >&2; exit 1; }
