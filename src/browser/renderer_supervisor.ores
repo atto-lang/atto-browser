@@ -1,43 +1,38 @@
-// ONE Oreslang supervisor actor per sandboxed renderer process.
-// Native fixture: local generation/lifecycle state, not OS process launch.
-// Integer actor commands are trusted-fixture-only, NOT authentic IPC:
-// 1 = host bound renderer generation 1, 2 = duplicate bind, 3 = stale
-// notification, 4 = fresh renderer crash; 5 = shutdown.
-// Production supervisor uses typed/authorized IPC and a real process handle.
+// Exactly one Oreslang supervisor actor per target renderer OS process.
+// LOCAL lifecycle fixture only: no OS launch, sandbox or authenticated IPC.
+// The sole state field is changed only by critical handle_state transitions.
 define actor RendererSupervisorActor as
-  let int renderer_generation = 0;
-  let bool renderer_live = false;
+  state {
+    renderer_generation: int = 0;
+    renderer_live: bool = false;
+  }
 
   receive(ActorMail<int> mail): void {
-    if mail.value == 1; do
-      if self.renderer_generation != 0; do
-        self.send(-1); return;
+    val operation = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      if operation == 1; do
+        if s.renderer_generation != 0; do return -1; fi
+        s.renderer_generation = 1;
+        s.renderer_live = true;
+        return 1;
       fi
-      self.renderer_generation = 1;
-      self.renderer_live = true;
-      self.send(1); return;
-    fi
-    if mail.value == 2; do
-      // A renderer cannot be rebound to another actor in the registry.
-      self.send(-1); return;
-    fi
-    if mail.value == 3; do
-      // An old-generation event is fenced out after restart/crash.
-      self.send(-1); return;
-    fi
-    if mail.value == 4; do
-      if !self.renderer_live; do self.send(-1); return; fi
-      self.renderer_live = false;
-      self.renderer_generation = self.renderer_generation + 1;
-      self.send(2); return;
-    fi
-    if mail.value == 5; do
-      self.renderer_live = false;
-      self.send(0);
-      self.end();
-      return;
-    fi
-    self.send(-1);
+      if operation == 2 || operation == 3; do
+        return -1;
+      fi
+      if operation == 4; do
+        if !s.renderer_live; do return -1; fi
+        s.renderer_live = false;
+        s.renderer_generation = s.renderer_generation + 1;
+        return 2;
+      fi
+      if operation == 5; do
+        s.renderer_live = false;
+        return 0;
+      fi
+      return -1;
+    });
+    self.send(reply);
+    if operation == 5; do self.end(); fi
     return;
   }
 end
