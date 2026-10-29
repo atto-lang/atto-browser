@@ -1,7 +1,8 @@
-// Actor-first tab ordering prototype, not a renderer or authentication gate.
-// -1 is a fixture-only orderly shutdown request; positive epochs increase.
+// Native Oreslang actor-epoch fixture. Actor data exists only inside state.
+// Every write is under a sealed handle_state critical loan. No suspension or
+// messaging occurs inside a critical section.
 define actor TabEpochActor as
-  let int last_epoch = 0;
+  state { last_epoch: int = 0; }
 
   receive(ActorMail<int> mail): void {
     if mail.value == -1; do
@@ -9,12 +10,15 @@ define actor TabEpochActor as
       self.end();
       return;
     fi
-    if mail.value > 0 && mail.value > self.last_epoch; do
-      self.last_epoch = mail.value;
-      self.send(mail.value);
-      return;
-    fi
-    self.send(-1);
+    val candidate = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      if candidate > 0 && candidate > s.last_epoch; do
+        s.last_epoch = candidate;
+        return candidate;
+      fi
+      return -1;
+    });
+    self.send(reply);
     return;
   }
 end
