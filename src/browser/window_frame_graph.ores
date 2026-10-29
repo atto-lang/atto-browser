@@ -18,14 +18,8 @@ define actor WindowFrameGraphActor as
     revision: int = 1;
   }
 
-  receive(ActorMail<int> mail): void {
-    if mail.value == 99; do
-      self.send(0);
-      self.end();
-      return;
-    fi
-    val operation = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  handle_operation(operation: int): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       // Guard every mutation from revision integer overflow.
       if operation == 1; do
         if s.revision >= 2147483647; do return -1; fi
@@ -120,6 +114,16 @@ define actor WindowFrameGraphActor as
       if operation == 14; do return s.revision; fi
       return -1;
     });
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 99; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
     self.send(reply);
     return;
   }
