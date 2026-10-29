@@ -4,6 +4,16 @@ Status: **architecture + Oreslang policy and actor prototypes only**. No
 operating-system window, rasterized web page, network stack or JavaScript
 engine runs in this repository yet.
 
+## Qt/QML desktop shell and Oreslang FFI contract
+
+**Decision: Qt 6 Quick/QML is the native UI, Oreslang is the sole browser
+backend, and a strict C ABI FFI bridges them.** Do not implement the browser
+backend in C++, QtWebEngine, or a Node/Python service. The C++ Qt integration
+is a thin platform/transport adapter, not a second business logic engine.
+
+See [QT_ORES_FFI.md](QT_ORES_FFI.md) for source files, ABI v1, threading,
+test/compile instructions and the missing actual Oreslang exported library.
+
 ## No-webview architecture
 
 Browser application logic, permission rules, history, tab strip, notification

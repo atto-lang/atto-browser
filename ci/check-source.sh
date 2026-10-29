@@ -3,13 +3,15 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f ci/native-cases.txt ]
-[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 8 ]
+[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 9 ]
 for file in src/isolation/policy.ores src/browser/tab_epoch.ores \
-    src/desktop/tab_policy.ores src/desktop/tab_session.ores \
+    src/desktop/tab_policy.ores src/desktop/ui_dispatch_policy.ores \
+    src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores \
     src/notifications/notification_policy.ores \
     src/workers/service_worker_policy.ores src/workers/lifecycle.ores \
     tests/guest/isolation_policy.ores tests/guest/tab_policy.ores \
+    tests/guest/ui_dispatch_policy.ores \
     tests/guest/notification_policy.ores tests/guest/service_worker_policy.ores; do
   [ -f "$file" ] || { echo "MISSING_SOURCE: $file" >&2; exit 1; }
 done
@@ -44,4 +46,6 @@ done
 for term in partition-register fetch-partition stale-subscription unapproved-promote queue-overflow; do
   grep -Fq "$term" tests/guest/service_worker_policy.ores
 done
+grep -Fq "pub fnc may_dispatch_ui_command(" src/desktop/ui_dispatch_policy.ores
+grep -Fq "FAIL:stale-tab" tests/guest/ui_dispatch_policy.ores
 echo "STATIC_SOURCE_AUDIT_PASS (NOT native execution)"

@@ -16,3 +16,5 @@ jobs:
         run: sh ci/check-source.sh
       - name: Native harness shell syntax
         run: sh -n ci/verify-native.sh
+      - name: Compile standalone C ABI headers and audit Qt FFI source
+        run: sh ci/check-qt-ffi.sh

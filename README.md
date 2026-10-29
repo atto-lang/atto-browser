@@ -33,6 +33,24 @@ an executable compiler, clean exact checkout, source checks and byte-for-byte
 execution results. At PR creation no genuine native execution has been
 demonstrated; compiler runs must be recorded separately.
 
+## Qt 6/QML UI + Oreslang FFI — desktop architecture enforced
+
+The desktop **UI is Qt 6 Quick/QML** in `desktop/qt/` and the
+**browser backend is Oreslang**. `UiBridge` only transfers commands and
+immutable snapshots across a versioned C FFI interface. There is **no
+production C++ browser backend and no WebEngine/WebView fallback**.
+
+`include/ores_browser_ui_abi_v1.h` specifies the required exports from
+a future Oreslang AOT backend library; `src/desktop/ui_dispatch_policy.ores`
+is the Oreslang-side FFI command admission policy. The Qt shell is offline
+if the actual backend library is absent or ABI incompatible. Until the
+native Oreslang browser supervisor is linked and a renderer exists,
+**the app does not browse websites**.
+
+See [Qt ↔ Oreslang FFI architecture](docs/QT_ORES_FFI.md) for ABI,
+threading, trusted library loading, build commands, missing gates and
+current status.
+
 ## Native desktop tabs, notifications, and workers — second slice
 
 - `src/desktop/window_tab_strip.ores`: bounded actor-owned tab strip
@@ -48,7 +66,7 @@ demonstrated; compiler runs must be recorded separately.
   scoped fetch, staged activation, bounded wake/push admission.
 - `src/workers/lifecycle.ores`: service-worker registration actor
   demonstration, including waiting updates and idle restarts.
-- Native guest manifest now has **eight** Oreslang sources, gated by
+- Native guest manifest now has **nine** Oreslang sources, gated by
   a compiler SHA pin. Compilation and real execution remain unverified.
 
 The desktop implementation will be a **native app, not Electron or
