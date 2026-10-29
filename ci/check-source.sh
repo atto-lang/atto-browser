@@ -3,9 +3,9 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f ci/native-cases.txt ]
-[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 11 ]
+[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 12 ]
 for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
-    src/browser/renderer_supervisor.ores src/browser/tab_epoch.ores \
+    src/browser/renderer_supervisor.ores src/browser/browser_supervisor.ores src/browser/tab_epoch.ores \
     src/desktop/tab_policy.ores src/desktop/ui_dispatch_policy.ores \
     src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores \
@@ -39,6 +39,19 @@ done
 grep -Fq 'define actor RendererSupervisorActor' src/browser/renderer_supervisor.ores
 grep -Fq 'FAIL:untrusted-hosted-subdomains' tests/guest/site_tenant_policy.ores
 grep -Fq 'FAIL:sibling-origin-read' tests/guest/site_tenant_policy.ores
+# These source checks are structural only; compilation is a separate gate.
+for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
+    src/browser/renderer_supervisor.ores src/desktop/tab_session.ores \
+    src/desktop/window_tab_strip.ores src/workers/lifecycle.ores; do
+  grep -Fq '  state {' "$actor"
+  grep -Fq 'self.handle_state(critical |s|' "$actor"
+  if grep -Eq 'self\.[A-Za-z_][A-Za-z_0-9]*[[:space:]]*=' "$actor"; then
+    echo "DIRECT_ACTOR_FIELD_WRITE: $actor" >&2
+    exit 1
+  fi
+done
+grep -Fq 'FAIL:stale-tab-id' src/browser/browser_supervisor.ores
+grep -Fq 'FAIL:nonrecycled-tab-id' src/browser/browser_supervisor.ores
 grep -Fq 'define actor TabEpochActor' src/browser/tab_epoch.ores
 grep -Fq 'define actor TabSessionActor' src/desktop/tab_session.ores
 grep -Fq 'define actor WindowTabStripActor' src/desktop/window_tab_strip.ores
