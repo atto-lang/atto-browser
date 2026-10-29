@@ -1,0 +1,114 @@
+// Service-worker registration and event routing policy.
+// All storage keys, scope matches, URLs and worker generations must come from
+// the privileged canonical URL/partition registry, not untrusted script.
+pub fnc may_register_service_worker(int request_tenant, int owner_tenant,
+    int script_origin, int document_origin, int scope_origin,
+    int request_storage_key, int registration_storage_key,
+    bool secure_context, bool script_same_origin,
+    bool scope_within_allowed_path, bool session_live): bool {
+  if request_tenant <= 0 || owner_tenant <= 0; do return false; fi
+  if script_origin <= 0 || document_origin <= 0 ||
+     scope_origin <= 0; do return false; fi
+  if request_storage_key <= 0 || registration_storage_key <= 0; do
+    return false;
+  fi
+  if !secure_context || !script_same_origin ||
+     !scope_within_allowed_path || !session_live; do return false; fi
+  return request_tenant == owner_tenant &&
+         script_origin == document_origin &&
+         scope_origin == document_origin &&
+         request_storage_key == registration_storage_key;
+}
+
+// Partition includes profile/tenant, top-level site and worker origin/scope.
+// client_origin is the controlled CLIENT document origin, NOT the fetched
+// resource's URL: a worker may intercept cross-origin resource requests.
+// Trusted URL resolver asserts scope_path_matches against client URL.
+// Worker must be active; timeout or missing worker falls back to network.
+pub fnc may_dispatch_worker_fetch(int client_tenant, int worker_tenant,
+    int client_storage_key, int worker_storage_key,
+    int client_origin, int worker_origin, bool scope_path_matches,
+    int presented_generation, int live_generation,
+    bool active, bool event_budget_available): bool {
+  if client_tenant <= 0 || worker_tenant <= 0; do return false; fi
+  if client_storage_key <= 0 || worker_storage_key <= 0; do
+    return false;
+  fi
+  if client_origin <= 0 || worker_origin <= 0; do return false; fi
+  if presented_generation <= 0 || live_generation <= 0; do
+    return false;
+  fi
+  if !scope_path_matches || !active || !event_budget_available; do
+    return false;
+  fi
+  return client_tenant == worker_tenant &&
+         client_storage_key == worker_storage_key &&
+         client_origin == worker_origin &&
+         presented_generation == live_generation;
+}
+
+// Existing active version and staged waiting version coexist. Promote only
+// after old clients drain, or after an explicit spec-compatible skipWaiting.
+// Actual client reassignment and database swap must be atomic in the broker.
+pub fnc may_promote_waiting_worker(int reg_tenant, int candidate_tenant,
+    int reg_storage_key, int candidate_storage_key,
+    int old_generation, int new_generation,
+    bool waiting_installed, bool old_clients_drained,
+    bool skip_waiting_requested, bool candidate_verified): bool {
+  if reg_tenant <= 0 || candidate_tenant <= 0; do return false; fi
+  if reg_storage_key <= 0 || candidate_storage_key <= 0; do return false; fi
+  if old_generation <= 0 || new_generation <= old_generation; do
+    return false;
+  fi
+  if !waiting_installed || !candidate_verified; do return false; fi
+  if !old_clients_drained && !skip_waiting_requested; do return false; fi
+  return reg_tenant == candidate_tenant &&
+         reg_storage_key == candidate_storage_key;
+}
+
+// Worker may be terminated while registration remains. Wake for bounded
+// events only; never keep a service worker running as a daemon by default.
+pub fnc may_wake_worker_for_event(int reg_tenant, int event_tenant,
+    int registration_key, int event_key, int presented_generation,
+    int active_generation, int queued_events, int max_queued_events,
+    bool registration_active, bool process_budget_available,
+    bool private_session_live): bool {
+  if reg_tenant <= 0 || event_tenant <= 0; do return false; fi
+  if registration_key <= 0 || event_key <= 0; do return false; fi
+  if presented_generation <= 0 || active_generation <= 0; do
+    return false;
+  fi
+  if queued_events < 0 || max_queued_events <= 0 ||
+     queued_events >= max_queued_events; do return false; fi
+  if !registration_active || !process_budget_available ||
+     !private_session_live; do return false;
+  fi
+  return reg_tenant == event_tenant &&
+         registration_key == event_key &&
+         presented_generation == active_generation;
+}
+
+// Push endpoint is a capability and must be bound to this partition and
+// registration; never use an endpoint or encryption key sent by a renderer
+// as independent authority. Registration epoch is stable across script updates
+// and changes upon registration replacement/revocation. A push subscription
+// must not break just because an active worker script version was updated.
+// Rate and OS notification gates apply separately.
+pub fnc may_receive_push(int request_tenant, int worker_tenant,
+    int subscription_storage_key, int worker_storage_key,
+    int subscription_registration_epoch, int current_registration_epoch,
+    bool subscription_valid, bool active_registration,
+    bool push_budget_available): bool {
+  if request_tenant <= 0 || worker_tenant <= 0; do return false; fi
+  if subscription_storage_key <= 0 || worker_storage_key <= 0; do
+    return false;
+  fi
+  if subscription_registration_epoch <= 0 || current_registration_epoch <= 0; do
+    return false;
+  fi
+  if !subscription_valid || !active_registration ||
+     !push_budget_available; do return false; fi
+  return request_tenant == worker_tenant &&
+         subscription_storage_key == worker_storage_key &&
+         subscription_registration_epoch == current_registration_epoch;
+}
