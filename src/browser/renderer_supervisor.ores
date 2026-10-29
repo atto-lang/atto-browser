@@ -7,9 +7,8 @@ define actor RendererSupervisorActor as
     renderer_live: bool = false;
   }
 
-  receive(ActorMail<int> mail): void {
-    val operation = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  handle_operation(operation: int): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       if operation == 1; do
         if s.renderer_generation != 0; do return -1; fi
         s.renderer_generation = 1;
@@ -31,6 +30,11 @@ define actor RendererSupervisorActor as
       fi
       return -1;
     });
+  }
+
+  receive(ActorMail<int> mail): void {
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
     self.send(reply);
     if operation == 5; do self.end(); fi
     return;
