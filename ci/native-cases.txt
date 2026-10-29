@@ -12,3 +12,5 @@ src/browser/renderer_supervisor.ores|browser:renderer-supervisor-ok
 src/browser/browser_supervisor.ores|browser:supervisor-tabs-ok
 tests/guest/frame_routing_policy.ores|browser:frame-routing-policy-ok
 src/browser/window_frame_graph.ores|browser:frame-graph-ok
+tests/guest/dynamic_frame_registry.ores|browser:dynamic-frame-registry-ok
+src/browser/window_frame_registry_actor.ores|browser:dynamic-registry-actor-ok

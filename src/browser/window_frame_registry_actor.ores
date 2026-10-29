@@ -1,0 +1,154 @@
+import module frame_registry from "./frame_registry";
+
+// Trusted window-local actor command fixture, NOT a renderer IPC format.
+// Production transport must authenticate window/profile/actor/renderer claims,
+// apply user/tab capability receipts and bound mailboxes before these methods.
+define class FrameRegistryCommand as
+  pub val int kind;
+  pub val int a;
+  pub val int b;
+  pub val int c;
+  pub val int d;
+  pub val int e;
+  pub val int f;
+
+  pub constructor(int kind, int a, int b, int c,
+                  int d, int e, int f) {
+    self.kind = kind;
+    self.a = a;
+    self.b = b;
+    self.c = c;
+    self.d = d;
+    self.e = e;
+    self.f = f;
+  }
+end
+
+// Per-window single-writer source actor for frame registry operations.
+// In production, one instance belongs to the real WindowSupervisor process.
+// Every state read/write occurs under the critical loan; actor outputs occur
+// only AFTER the state loan closes. No network/OS/IPC calls inside the loan.
+define actor WindowFrameRegistryActor as
+  state {
+    registry: frame_registry.Registry =
+      new frame_registry.Registry(1, 1, 1);
+  }
+
+  handle_operation(command: FrameRegistryCommand): int
+      using state.read, state.write {
+    return self.handle_state(critical |s| -> {
+      if command.kind == 1; do
+        if s.registry.register_process(command.a, command.b,
+            command.c, command.d, command.e); do return 1; fi
+        return -1;
+      fi
+      if command.kind == 2; do
+        return s.registry.attach_frame(command.a, command.b, command.c,
+            command.d, command.e, command.f);
+      fi
+      if command.kind == 3; do
+        if s.registry.commit_navigation(command.a, command.b, command.c,
+            command.d, command.e, command.f); do return 1; fi
+        return -1;
+      fi
+      if command.kind == 4; do
+        return s.registry.close_subtree(command.a, command.b);
+      fi
+      if command.kind == 5; do
+        return s.registry.reference_count(command.a);
+      fi
+      if command.kind == 6; do
+        return s.registry.frame_epoch(command.a);
+      fi
+      if command.kind == 7; do
+        if s.registry.can_retire(command.a, command.b); do return 1; fi
+        return -1;
+      fi
+      if command.kind == 8; do
+        if s.registry.retire_process(command.a, command.b, true); do
+          return 1;
+        fi
+        return -1;
+      fi
+      if command.kind == 9; do
+        if s.registry.pin_ipc(command.a, command.b); do return 1; fi
+        return -1;
+      fi
+      if command.kind == 10; do
+        if s.registry.settle_ipc(command.a, command.b); do return 1; fi
+        return -1;
+      fi
+      if command.kind == 11; do
+        return s.registry.crash_process(command.a, command.b, true);
+      fi
+      if command.kind == 12; do
+        return s.registry.revision_number();
+      fi
+      return -1;
+    });
+  }
+
+  receive(ActorMail<FrameRegistryCommand> mail): void {
+    val command = mail.value;
+    if command.kind == 99; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val reply = self.handle_operation(command);
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val window_one = await spawn WindowFrameRegistryActor();
+  val window_two = await spawn WindowFrameRegistryActor();
+  window_one.send(new FrameRegistryCommand(1, 10, 1, 100, 1000, 0, 0));
+  val registered = (await window_one.outputs.next()).value.unwrap();
+  if registered.value != 1; do
+    stdio.stdout.write("FAIL:actor-register"); return;
+  fi
+  window_one.send(new FrameRegistryCommand(2, 11, 0, 10, 1, 100, 1100));
+  val root = (await window_one.outputs.next()).value.unwrap();
+  window_one.send(new FrameRegistryCommand(2, 12, 0, 10, 1, 100, 1101));
+  val other_tab = (await window_one.outputs.next()).value.unwrap();
+  if root.value != 1 || other_tab.value != 2; do
+    stdio.stdout.write("FAIL:actor-two-tabs"); return;
+  fi
+  window_one.send(new FrameRegistryCommand(5, 10, 0, 0, 0, 0, 0));
+  val shared = (await window_one.outputs.next()).value.unwrap();
+  if shared.value != 2; do
+    stdio.stdout.write("FAIL:actor-shared-renderer"); return;
+  fi
+  window_one.send(new FrameRegistryCommand(4, 1, 1, 0, 0, 0, 0));
+  val closed = (await window_one.outputs.next()).value.unwrap();
+  window_one.send(new FrameRegistryCommand(7, 10, 1, 0, 0, 0, 0));
+  val still_active = (await window_one.outputs.next()).value.unwrap();
+  if closed.value != 1 || still_active.value != -1; do
+    stdio.stdout.write("FAIL:actor-premature-retire"); return;
+  fi
+  window_two.send(new FrameRegistryCommand(5, 10, 0, 0, 0, 0, 0));
+  val isolated = (await window_two.outputs.next()).value.unwrap();
+  if isolated.value != 0; do
+    stdio.stdout.write("FAIL:actor-other-window-leak"); return;
+  fi
+  window_one.send(new FrameRegistryCommand(4, 2, 1, 0, 0, 0, 0));
+  val last = (await window_one.outputs.next()).value.unwrap();
+  window_one.send(new FrameRegistryCommand(7, 10, 1, 0, 0, 0, 0));
+  val can_retire = (await window_one.outputs.next()).value.unwrap();
+  if last.value != 1 || can_retire.value != 1; do
+    stdio.stdout.write("FAIL:actor-last-reference"); return;
+  fi
+  window_one.send(new FrameRegistryCommand(99, 0, 0, 0, 0, 0, 0));
+  val bye_one = (await window_one.outputs.next()).value.unwrap();
+  window_two.send(new FrameRegistryCommand(99, 0, 0, 0, 0, 0, 0));
+  val bye_two = (await window_two.outputs.next()).value.unwrap();
+  await window_one.get_done();
+  await window_two.get_done();
+  if bye_one.value != 0 || bye_two.value != 0; do
+    stdio.stdout.write("FAIL:actor-shutdown"); return;
+  fi
+  stdio.stdout.write("browser:dynamic-registry-actor-ok");
+  return;
+}

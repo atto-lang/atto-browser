@@ -3,10 +3,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f ci/native-cases.txt ]
-[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 14 ]
+[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 16 ]
 for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
     src/browser/renderer_supervisor.ores src/browser/browser_supervisor.ores \
     src/browser/window_frame_graph.ores src/browser/frame_routing_policy.ores \
+    src/browser/frame_registry.ores src/browser/window_frame_registry_actor.ores \
     src/browser/tab_epoch.ores \
     src/desktop/tab_policy.ores src/desktop/ui_dispatch_policy.ores \
     src/desktop/tab_session.ores \
@@ -15,6 +16,7 @@ for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
     src/workers/service_worker_policy.ores src/workers/lifecycle.ores \
     tests/guest/isolation_policy.ores tests/guest/site_tenant_policy.ores \
     tests/guest/frame_routing_policy.ores \
+    tests/guest/dynamic_frame_registry.ores \
     tests/guest/tab_policy.ores \
     tests/guest/ui_dispatch_policy.ores \
     tests/guest/notification_policy.ores tests/guest/service_worker_policy.ores; do
@@ -56,6 +58,7 @@ grep -Fq 'FAIL:sibling-origin-read' tests/guest/site_tenant_policy.ores
 # These source checks are structural only; compilation is a separate gate.
 for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     src/browser/window_frame_graph.ores \
+    src/browser/window_frame_registry_actor.ores \
     src/browser/renderer_supervisor.ores src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores src/workers/lifecycle.ores; do
   [ "$(grep -Ec '^  state \{' "$actor")" -eq 1 ] || {
@@ -77,6 +80,19 @@ for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     exit 1
   fi
 done
+grep -Fq 'define module frame_registry as' src/browser/frame_registry.ores
+grep -Fq 'pub fnc attach_frame(mut self)' src/browser/frame_registry.ores
+grep -Fq 'pub fnc close_subtree(mut self)' src/browser/frame_registry.ores
+grep -Fq 'TWO PHASES: compute descendants' src/browser/frame_registry.ores
+grep -Fq 'pub fnc crash_process(mut self)' src/browser/frame_registry.ores
+grep -Fq 'pub can_retire(' src/browser/frame_registry.ores
+grep -Fq 'define actor WindowFrameRegistryActor' src/browser/window_frame_registry_actor.ores
+for term in three-deep-subtree shared-renderer-other-tab \
+    tombstone-reuse-without-id-recycling crash-recovery \
+    duplicate-process-or-actor; do
+  grep -Fq "FAIL:$term" tests/guest/dynamic_frame_registry.ores
+done
+grep -Fq 'FAIL:actor-other-window-leak' src/browser/window_frame_registry_actor.ores
 grep -Fq 'FAIL:stale-child-surface' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:cross-tab-damage' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:stale-tab-id' src/browser/browser_supervisor.ores
