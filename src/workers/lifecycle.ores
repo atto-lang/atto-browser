@@ -10,9 +10,8 @@ define actor WorkerRegistrationActor as
     generation: int = 0;
   }
 
-  receive(ActorMail<String> mail): void {
-    val operation = mail.value;
-    val reply = self.handle_state(critical |s| -> {
+  handle_operation(operation: String): String using state.read, state.write {
+    return self.handle_state(critical |s| -> {
       if operation == "register"; do
         if s.registered; do return "duplicate"; fi
         s.registered = true;
@@ -62,6 +61,11 @@ define actor WorkerRegistrationActor as
       fi
       return "rejected";
     });
+  }
+
+  receive(ActorMail<String> mail): void {
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
     self.send(reply);
     if operation == "unregister" && reply == "unregistered"; do
       self.end();
