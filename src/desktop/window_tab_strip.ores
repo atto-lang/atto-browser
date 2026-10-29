@@ -1,50 +1,55 @@
-// Native window tab-strip actor: index ordering and focus policy.
-// Presentation indices are NOT stable tab identities; trusted browser must
-// map indices to generation-fenced tab IDs after a close/reorder.
-// Bounded to 64 tabs. The UI/OS window adapter is still unimplemented.
+// Window tab-strip prototype with one actor-owned state schema.
+// These ordered presentation indices are NOT stable tab IDs and must not
+// be used across the FFI. All mutations use handle_state critical callbacks.
 define actor WindowTabStripActor as
-  let int tab_count = 0;
-  let int selected_index = 0;
+  state {
+    tab_count: int = 0;
+    selected_index: int = 0;
+  }
 
   receive(ActorMail<String> mail): void {
-    if mail.value == "new"; do
-      if self.tab_count >= 64; do self.send(-1); return; fi
-      self.tab_count = self.tab_count + 1;
-      self.selected_index = self.tab_count;
-      self.send(self.selected_index); return;
-    fi
-    if mail.value == "next"; do
-      if self.tab_count <= 0; do self.send(-1); return; fi
-      if self.selected_index == self.tab_count; do
-        self.selected_index = 1;
-      else
-        self.selected_index = self.selected_index + 1;
-      fi
-      self.send(self.selected_index); return;
-    fi
-    if mail.value == "previous"; do
-      if self.tab_count <= 0; do self.send(-1); return; fi
-      if self.selected_index <= 1; do
-        self.selected_index = self.tab_count;
-      else
-        self.selected_index = self.selected_index - 1;
-      fi
-      self.send(self.selected_index); return;
-    fi
-    if mail.value == "close-tab"; do
-      if self.tab_count <= 0; do self.send(-1); return; fi
-      self.tab_count = self.tab_count - 1;
-      if self.selected_index > self.tab_count; do
-        self.selected_index = self.tab_count;
-      fi
-      self.send(self.selected_index); return;
-    fi
     if mail.value == "quit"; do
       self.send(0);
       self.end();
       return;
     fi
-    self.send(-1);
+    val operation = mail.value;
+    val reply = self.handle_state(critical |s| -> {
+      if operation == "new"; do
+        if s.tab_count >= 64; do return -1; fi
+        s.tab_count = s.tab_count + 1;
+        s.selected_index = s.tab_count;
+        return s.selected_index;
+      fi
+      if operation == "next"; do
+        if s.tab_count <= 0; do return -1; fi
+        if s.selected_index == s.tab_count; do
+          s.selected_index = 1;
+        else
+          s.selected_index = s.selected_index + 1;
+        fi
+        return s.selected_index;
+      fi
+      if operation == "previous"; do
+        if s.tab_count <= 0; do return -1; fi
+        if s.selected_index <= 1; do
+          s.selected_index = s.tab_count;
+        else
+          s.selected_index = s.selected_index - 1;
+        fi
+        return s.selected_index;
+      fi
+      if operation == "close-tab"; do
+        if s.tab_count <= 0; do return -1; fi
+        s.tab_count = s.tab_count - 1;
+        if s.selected_index > s.tab_count; do
+          s.selected_index = s.tab_count;
+        fi
+        return s.selected_index;
+      fi
+      return -1;
+    });
+    self.send(reply);
     return;
   }
 end
