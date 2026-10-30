@@ -102,6 +102,12 @@ void BackendWorker::start() {
     config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
     // Privileged Oreslang supervisor chooses tenant and profile.
     config.private_session = 0;
+    // Checked only for canonical wire shape; trusted Oreslang remains
+    // authoritative for profile/tenant admission and actor allocation.
+    if (!ores_browser_validate_config_v1(&config)) {
+        failClosed(QStringLiteral("Malformed browser session configuration"));
+        return;
+    }
     const int32_t status = open_(&config, &handle_);
     if (status != ORES_BROWSER_OK || !handle_) {
         failClosed(QStringLiteral("Oreslang supervisor refused startup"));
@@ -146,7 +152,11 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     OresBrowserCommand command{};
     command.struct_size = sizeof(command);
     command.operation = op;
-    if (op != ORES_BROWSER_CMD_NEW_TAB) {
+    if (op != ORES_BROWSER_CMD_NEW_TAB &&
+        op != ORES_BROWSER_CMD_NEXT_TAB &&
+        op != ORES_BROWSER_CMD_PREVIOUS_TAB) {
+        // Only tab-targeted commands borrow an explicit tab identity.
+        // The supervisor owns the session-level next/previous selection.
         bool id_ok = false, gen_ok = false;
         command.tab_id = id.toULongLong(&id_ok, 10);
         command.tab_generation = generation.toULongLong(&gen_ok, 10);
@@ -343,9 +353,9 @@ void UiBridge::reload() {
 }
 void UiBridge::nextTab() {
     if (!activeId_.isEmpty())
-        submit(ORES_BROWSER_CMD_NEXT_TAB, activeId_, activeGeneration_);
+        submit(ORES_BROWSER_CMD_NEXT_TAB);
 }
 void UiBridge::previousTab() {
     if (!activeId_.isEmpty())
-        submit(ORES_BROWSER_CMD_PREVIOUS_TAB, activeId_, activeGeneration_);
+        submit(ORES_BROWSER_CMD_PREVIOUS_TAB);
 }
