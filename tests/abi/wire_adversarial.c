@@ -109,6 +109,19 @@ int main(void) {
   EXPECT(!ores_browser_validate_command_v1(&command), "unexpected-url");
   memset(command.url, 0, sizeof(command.url));
   EXPECT(ores_browser_validate_command_v1(&command), "valid-close");
+  command.operation = ORES_BROWSER_CMD_NEXT_TAB;
+  command.tab_id = 0u; command.tab_generation = 0u;
+  EXPECT(ores_browser_validate_command_v1(&command), "session-scoped-next");
+  command.tab_id = 41u; command.tab_generation = 5u;
+  EXPECT(!ores_browser_validate_command_v1(&command), "next-tab-smuggle");
+  command.operation = ORES_BROWSER_CMD_PREVIOUS_TAB;
+  command.tab_id = 0u; command.tab_generation = 0u;
+  EXPECT(ores_browser_validate_command_v1(&command), "session-scoped-previous");
+  command.tab_generation = 1u;
+  EXPECT(!ores_browser_validate_command_v1(&command), "previous-generation-smuggle");
+  command.tab_generation = 0u;
+  command.operation = ORES_BROWSER_CMD_SELECT_TAB;
+  EXPECT(!ores_browser_validate_command_v1(&command), "missing-tab-capability");
   command.operation = 999u;
   EXPECT(!ores_browser_validate_command_v1(&command), "unknown-op");
 
