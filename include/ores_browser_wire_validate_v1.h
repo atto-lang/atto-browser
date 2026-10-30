@@ -52,7 +52,13 @@ static inline int ores_browser_validate_command_v1(
       command->operation < ORES_BROWSER_CMD_NEW_TAB ||
       command->operation > ORES_BROWSER_CMD_PREVIOUS_TAB) return 0;
 
-  if (command->operation == ORES_BROWSER_CMD_NEW_TAB) {
+  /* Session-scoped operations never borrow a tab capability. The other
+   * operations always require an explicit tab ID and generation; the
+   * trusted actor still verifies that capability belongs to this session.
+   */
+  if (command->operation == ORES_BROWSER_CMD_NEW_TAB ||
+      command->operation == ORES_BROWSER_CMD_NEXT_TAB ||
+      command->operation == ORES_BROWSER_CMD_PREVIOUS_TAB) {
     if (command->tab_id != 0u || command->tab_generation != 0u) return 0;
   } else if (command->tab_id == 0u || command->tab_generation == 0u) {
     return 0;
