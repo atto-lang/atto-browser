@@ -12,6 +12,7 @@ int main(void) {
   OresBrowserSnapshot *snapshot =
       (OresBrowserSnapshot *)calloc(1u, sizeof(OresBrowserSnapshot));
   OresBrowserCommand command = {0};
+  OresBrowserConfig config = {0};
   if (!snapshot) return 2;
   snapshot->struct_size = sizeof(*snapshot);
   snapshot->abi_version = ORES_BROWSER_UI_ABI_VERSION;
@@ -62,9 +63,37 @@ int main(void) {
   EXPECT(!ores_browser_validate_snapshot_v1(snapshot, 0u, 0), "bad-version");
   snapshot->abi_version = 1u;
 
+  config.struct_size = sizeof(config);
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  EXPECT(ores_browser_validate_config_v1(&config), "valid-config");
+  EXPECT(!ores_browser_validate_config_v1(NULL), "null-config");
+  config.struct_size--;
+  EXPECT(!ores_browser_validate_config_v1(&config), "short-config");
+  config.struct_size = sizeof(config);
+  config.abi_version++;
+  EXPECT(!ores_browser_validate_config_v1(&config), "future-config-version");
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  config.private_session = 2u;
+  EXPECT(!ores_browser_validate_config_v1(&config), "nonbool-private-session");
+  config.private_session = 1u;
+  EXPECT(ores_browser_validate_config_v1(&config), "valid-private-config");
+  config.reserved = 1u;
+  EXPECT(!ores_browser_validate_config_v1(&config), "config-reserved");
+  config.reserved = 0u;
+  EXPECT(ores_browser_validate_config_v1(&config), "restored-config");
+
   command.struct_size = sizeof(command);
   command.operation = ORES_BROWSER_CMD_NEW_TAB;
   EXPECT(ores_browser_validate_command_v1(&command), "new-tab");
+  memcpy(command.url, "https://a.test/", 16u);
+  EXPECT(ores_browser_validate_command_v1(&command), "new-tab-optional-url");
+  command.url[200] = 'X';
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-nonzero-padding");
+  command.url[200] = 0;
+  memset(command.url, 'X', sizeof(command.url));
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-unterminated");
+  memset(command.url, 0, sizeof(command.url));
+  EXPECT(ores_browser_validate_command_v1(&command), "restored-empty-new-tab-url");
   command.tab_id = 1u;
   EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-smuggle");
   command.tab_id = 0u;
