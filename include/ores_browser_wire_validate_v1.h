@@ -33,6 +33,19 @@ static inline int ores_browser_wire_string_v1(const char *data, size_t cap) {
   return ores_browser_zero_bytes_v1(data + end, cap - end);
 }
 
+/* Strict host configuration admission before any actor/session allocation.
+ * This checks the wire record only; profile authorization is a separate
+ * privileged policy decision in the native Oreslang backend.
+ */
+static inline int ores_browser_validate_config_v1(
+    const OresBrowserConfig *config) {
+  return config != NULL &&
+      config->struct_size == sizeof(*config) &&
+      config->abi_version == ORES_BROWSER_UI_ABI_VERSION &&
+      config->private_session <= 1u &&
+      config->reserved == 0u;
+}
+
 static inline int ores_browser_validate_command_v1(
     const OresBrowserCommand *command) {
   if (!command || command->struct_size != sizeof(*command) ||
@@ -50,7 +63,14 @@ static inline int ores_browser_validate_command_v1(
     if (command->url[0] == '\0') return 0;
     return ores_browser_wire_string_v1(command->url, ORES_BROWSER_URL_BYTES);
   }
-  /* All non-navigation commands must not smuggle URL bytes. */
+  if (command->operation == ORES_BROWSER_CMD_NEW_TAB) {
+    /* A new tab may have no initial URL or a canonical, bounded URL field.
+     * The browser actor is still responsible for canonicalizing and
+     * authorizing the actual origin before any navigation occurs.
+     */
+    return ores_browser_wire_string_v1(command->url, ORES_BROWSER_URL_BYTES);
+  }
+  /* Every other command must not smuggle URL bytes. */
   return ores_browser_zero_bytes_v1(command->url, ORES_BROWSER_URL_BYTES);
 }
 
