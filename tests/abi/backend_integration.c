@@ -157,6 +157,25 @@ int main(int argc, char **argv) {
                   ? view->tabs[1].tab_id : view->tabs[0].tab_id;
   if (second_id == first_id || second_id == 0u) die("duplicate tab identity");
   second_gen = find_tab(view, second_id)->generation;
+  /* NEXT/PREVIOUS are session-scoped: both tab identity fields are zero.
+   * They must move focus among tabs without creating or losing a tab.
+   */
+  revision = view->revision;
+  command(&cmd, ORES_BROWSER_CMD_NEXT_TAB, 0u, 0u);
+  if (dispatch(browser, &cmd) != ORES_BROWSER_OK)
+    die("session-level next tab rejected");
+  snapshot(read, browser, view, revision);
+  if (view->revision <= revision || view->tab_count != 2u ||
+      !find_tab(view, first_id) || find_tab(view, first_id)->active != 1u)
+    die("session next tab did not rotate to first");
+  revision = view->revision;
+  command(&cmd, ORES_BROWSER_CMD_PREVIOUS_TAB, 0u, 0u);
+  if (dispatch(browser, &cmd) != ORES_BROWSER_OK)
+    die("session-level previous tab rejected");
+  snapshot(read, browser, view, revision);
+  if (view->revision <= revision || view->tab_count != 2u ||
+      !find_tab(view, second_id) || find_tab(view, second_id)->active != 1u)
+    die("session previous tab did not rotate to second");
   // Two tabs in one session must not leak into an independent window.
   snapshot(read, other_browser, other_view, other_revision);
   if (other_view->tab_count != 0u || other_view->revision != other_revision)
