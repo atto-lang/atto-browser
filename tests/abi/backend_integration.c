@@ -79,6 +79,33 @@ int main(int argc, char **argv) {
   if (version() != ORES_BROWSER_UI_ABI_VERSION) die("backend ABI version");
   config.struct_size = (uint32_t)sizeof(config);
   config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  /* Invalid host config must fail before an actor/session is allocated. */
+  {
+    OresBrowserConfig malformed = config;
+    OresBrowserHandle *unexpected = NULL;
+    malformed.struct_size = (uint32_t)sizeof(config) - 1u;
+    if (open_session(&malformed, &unexpected) == ORES_BROWSER_OK ||
+        unexpected != NULL)
+      die("undersized config created a session");
+    malformed = config;
+    malformed.abi_version = ORES_BROWSER_UI_ABI_VERSION + 1u;
+    unexpected = NULL;
+    if (open_session(&malformed, &unexpected) == ORES_BROWSER_OK ||
+        unexpected != NULL)
+      die("unsupported config version created a session");
+    malformed = config;
+    malformed.private_session = 2u;
+    unexpected = NULL;
+    if (open_session(&malformed, &unexpected) == ORES_BROWSER_OK ||
+        unexpected != NULL)
+      die("nonboolean private-session flag created a session");
+    malformed = config;
+    malformed.reserved = 1u;
+    unexpected = NULL;
+    if (open_session(&malformed, &unexpected) == ORES_BROWSER_OK ||
+        unexpected != NULL)
+      die("nonzero reserved config created a session");
+  }
   if (open_session(&config, &browser) != ORES_BROWSER_OK || !browser)
     die("backend open (requires trusted fresh test session)");
   if (open_session(&config, &other_browser) != ORES_BROWSER_OK ||
