@@ -120,6 +120,26 @@ int main(int argc, char **argv) {
   snapshot(read, browser, view, 0u);
   if (view->tab_count != 0u) die("test session must start with zero tabs");
   revision = view->revision;
+  /* Rejected wire commands may never mutate the actor-owned revision. */
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  cmd.struct_size--;
+  if (dispatch(browser, &cmd) == ORES_BROWSER_OK)
+    die("undersized command accepted");
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  cmd.operation = 999u;
+  if (dispatch(browser, &cmd) == ORES_BROWSER_OK)
+    die("unknown operation accepted");
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  cmd.tab_id = 77u;
+  if (dispatch(browser, &cmd) == ORES_BROWSER_OK)
+    die("new-tab identity smuggling admitted");
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  memset(cmd.url, 'X', sizeof(cmd.url));
+  if (dispatch(browser, &cmd) == ORES_BROWSER_OK)
+    die("unterminated new-tab URL admitted");
+  snapshot(read, browser, view, revision);
+  if (view->revision != revision || view->tab_count != 0u)
+    die("invalid command mutated empty browser");
   command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
   if (dispatch(browser, &cmd) != ORES_BROWSER_OK) die("create first tab");
   snapshot(read, browser, view, revision);
