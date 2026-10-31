@@ -292,7 +292,7 @@ void UiBridge::start() {
     // Completion is delivered on the UI event loop, never on the FFI worker.
     // A wedged foreign call cannot free a reservation and flood this queue.
     connect(worker_, &BackendWorker::commandCompleted, this,
-            [this] { command_queue_.complete(); });
+            [this] { command_queue_.complete(); }, Qt::QueuedConnection);
     connect(worker_, &BackendWorker::rejected, this,
             [this](const QString &message) {
         status_ = message;
@@ -319,6 +319,14 @@ void UiBridge::start() {
 void UiBridge::submit(uint32_t op, const QString &id,
                       const QString &generation, const QString &url) {
     if (!worker_ || !connected_) return;
+    if (!OresBrowserUiQueueV1::captureFits(op,
+            static_cast<std::size_t>(id.size()),
+            static_cast<std::size_t>(generation.size()),
+            static_cast<std::size_t>(url.size()))) {
+        status_ = QStringLiteral("Invalid or oversized UI command arguments");
+        emit statusChanged();
+        return;
+    }
     if (!command_queue_.tryReserve()) {
         status_ = QStringLiteral("UI command queue full; retry after backend responds");
         emit statusChanged();
