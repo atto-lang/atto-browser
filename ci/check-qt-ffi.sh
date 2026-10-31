@@ -17,9 +17,17 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
 "$tmp/abi-wire"
 # Execute the same UI-thread-only limiter used by the Qt bridge. This checks
 # saturation, non-wrapping counts and draining, not Qt event-loop behavior.
-c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue"
 "$tmp/ui-queue"
+# If Clang is present, also execute the identical byte-boundary matrix under
+# memory and undefined-behavior sanitizers; a sanitizer failure is fatal.
+if command -v clang++ >/dev/null 2>&1; then
+  clang++ -std=c++17 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue-sanitize"
+  "$tmp/ui-queue-sanitize"
+fi
 # Compile/link integration acceptance, but NEVER run without pinned real
 # Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
@@ -41,6 +49,7 @@ grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
 grep -Fq 'command_queue_.tryReserve()' desktop/qt/UiBridge.cpp
+grep -Fq 'OresBrowserUiQueueV1::captureFits' desktop/qt/UiBridge.cpp
 grep -Fq 'commandCompleted' desktop/qt/UiBridge.cpp
 grep -Fq 'textFormat: Text.PlainText' desktop/qt/Main.qml
 if grep -Eiq '(WebEngineView|import QtWebEngine|QtWebView|WKWebView|WebView2|Electron)' desktop/qt/Main.qml; then
