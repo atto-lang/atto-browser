@@ -15,11 +15,16 @@ c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
 "$tmp/abi-wire"
+# Execute the same UI-thread-only limiter used by the Qt bridge. This checks
+# saturation, non-wrapping counts and draining, not Qt event-loop behavior.
+c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue"
+"$tmp/ui-queue"
 # Compile/link integration acceptance, but NEVER run without pinned real
 # Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/backend_integration.c -ldl -o "$tmp/backend-ffi"
-echo "ABI_LAYOUT_AND_WIRE_ADVERSARIAL_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
+echo "ABI_LAYOUT_WIRE_AND_UI_QUEUE_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
 for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
     desktop/qt/UiBridge.cpp desktop/qt/Main.qml \
     desktop/qt/CMakeLists.txt include/ores_browser_ui_abi_v1.h; do
@@ -35,6 +40,8 @@ grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
+grep -Fq 'command_queue_.tryReserve()' desktop/qt/UiBridge.cpp
+grep -Fq 'commandCompleted' desktop/qt/UiBridge.cpp
 grep -Fq 'textFormat: Text.PlainText' desktop/qt/Main.qml
 if grep -Eiq '(WebEngineView|import QtWebEngine|QtWebView|WKWebView|WebView2|Electron)' desktop/qt/Main.qml; then
   echo "FORBIDDEN_EMBEDDED_WEBVIEW" >&2
