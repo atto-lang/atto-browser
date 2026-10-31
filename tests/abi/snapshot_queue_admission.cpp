@@ -3,7 +3,7 @@
 #include <cstdio>
 
 #define CHECK(expr) do { \
-    if (!(expr)) { std::fprintf(stderr, "FAIL:%s:%d:%s\\n", __FILE__, __LINE__, #expr); return 1; } \
+    if (!(expr)) { std::fprintf(stderr, "FAIL:%s:%d:%s\n", __FILE__, __LINE__, #expr); return 1; } \
 } while (0)
 
 int main() {
