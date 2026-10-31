@@ -1,0 +1,200 @@
+// BrowserSessionLifecycleActor — guest-owned, per-session lifecycle slice.
+//
+// This is executable Oreslang ACTOR behavior, NOT an implementation of the
+// browser C pointer ABI, tenant authorization, native memory isolation, or
+// renderer confinement. Integer messages below are fixture-only:
+//   1: open session and return a fresh generation
+//   2: query live generation (0 means closed)
+//   3: query monotonic state revision
+//   4: query live count (0 or 1)
+//   1000 + generation: close exactly that live generation
+//   9: stop actor (fixture teardown, no FFI handles)
+//
+// A retired generation is never recycled. All mutations take the actor's
+// critical state loan; the receiving loop sends its reply outside the loan.
+define actor BrowserSessionLifecycleActor as
+  state {
+    live_generation: int = 0;
+    next_generation: int = 1;
+    revision: int = 1;
+  }
+
+  handle_operation(operation: int): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
+      if operation == 1; do
+        if s.live_generation != 0; do return -1; fi
+        if s.revision >= 2147483647; do return -1; fi
+        if s.next_generation <= 0 || s.next_generation >= 2147482647; do
+          return -1;
+        fi
+        val generation = s.next_generation;
+        s.next_generation = generation + 1;
+        s.live_generation = generation;
+        s.revision = s.revision + 1;
+        return generation;
+      fi
+
+      if operation == 2; do return s.live_generation; fi
+      if operation == 3; do return s.revision; fi
+      if operation == 4; do
+        if s.live_generation > 0; do return 1; fi
+        return 0;
+      fi
+
+      // No unbounded arithmetic: generation is bounded on creation and
+      // encoding uses addition only after checking an upper bound.
+      if operation >= 1001; do
+        if s.revision >= 2147483647; do return -1; fi
+        val presented_generation = operation - 1000;
+        if s.live_generation == 0 ||
+           presented_generation != s.live_generation; do
+          return -1;
+        fi
+        s.live_generation = 0;
+        s.revision = s.revision + 1;
+        return presented_generation;
+      fi
+      return -1;
+    });
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 9; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val reply = self.handle_operation(mail.value);
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val session = await spawn BrowserSessionLifecycleActor();
+
+  session.send(2);
+  val initially_closed = (await session.outputs.next()).value.unwrap();
+  if initially_closed.value != 0; do
+    stdio.stdout.write("FAIL:initial-session-live"); return;
+  fi
+
+  session.send(1);
+  val a = (await session.outputs.next()).value.unwrap();
+  if a.value != 1; do
+    stdio.stdout.write("FAIL:first-session-generation"); return;
+  fi
+
+  session.send(1);
+  val duplicate_open = (await session.outputs.next()).value.unwrap();
+  if duplicate_open.value != -1; do
+    stdio.stdout.write("FAIL:duplicate-session-open"); return;
+  fi
+
+  session.send(3);
+  val revision_two = (await session.outputs.next()).value.unwrap();
+  if revision_two.value != 2; do
+    stdio.stdout.write("FAIL:duplicate-open-mutated"); return;
+  fi
+
+  // Invalid presented generation is a no-op, not session retirement.
+  session.send(1002);
+  val wrong_close = (await session.outputs.next()).value.unwrap();
+  if wrong_close.value != -1; do
+    stdio.stdout.write("FAIL:wrong-generation-close"); return;
+  fi
+
+  session.send(2);
+  val still_open = (await session.outputs.next()).value.unwrap();
+  if still_open.value != 1; do
+    stdio.stdout.write("FAIL:wrong-close-retired-session"); return;
+  fi
+
+  session.send(1001);
+  val closed_first = (await session.outputs.next()).value.unwrap();
+  if closed_first.value != 1; do
+    stdio.stdout.write("FAIL:close-first-session"); return;
+  fi
+
+  session.send(1001);
+  val replayed_close = (await session.outputs.next()).value.unwrap();
+  if replayed_close.value != -1; do
+    stdio.stdout.write("FAIL:replayed-close"); return;
+  fi
+
+  session.send(1);
+  val b = (await session.outputs.next()).value.unwrap();
+  if b.value != 2; do
+    stdio.stdout.write("FAIL:recycled-session-generation"); return;
+  fi
+
+  session.send(1001);
+  val stale_close = (await session.outputs.next()).value.unwrap();
+  if stale_close.value != -1; do
+    stdio.stdout.write("FAIL:stale-session-close"); return;
+  fi
+
+  session.send(2);
+  val live_second = (await session.outputs.next()).value.unwrap();
+  if live_second.value != 2; do
+    stdio.stdout.write("FAIL:stale-close-damaged-current"); return;
+  fi
+
+  session.send(3);
+  val stable_revision = (await session.outputs.next()).value.unwrap();
+  if stable_revision.value != 4; do
+    stdio.stdout.write("FAIL:revision-on-reject"); return;
+  fi
+
+  // Actor-owned state is isolated: a separate session starts at generation
+  // one and cannot mutate, close or inspect this actor through its mailbox.
+  val other = await spawn BrowserSessionLifecycleActor();
+  other.send(4);
+  val empty_other = (await other.outputs.next()).value.unwrap();
+  if empty_other.value != 0; do
+    stdio.stdout.write("FAIL:cross-session-live-state"); return;
+  fi
+
+  other.send(1);
+  val other_generation = (await other.outputs.next()).value.unwrap();
+  if other_generation.value != 1; do
+    stdio.stdout.write("FAIL:independent-session-generation"); return;
+  fi
+
+  other.send(1001);
+  val other_closed = (await other.outputs.next()).value.unwrap();
+  if other_closed.value != 1; do
+    stdio.stdout.write("FAIL:other-session-close"); return;
+  fi
+
+  session.send(2);
+  val still_live = (await session.outputs.next()).value.unwrap();
+  if still_live.value != 2; do
+    stdio.stdout.write("FAIL:cross-session-retirement"); return;
+  fi
+
+  session.send(1002);
+  val closed_second = (await session.outputs.next()).value.unwrap();
+  if closed_second.value != 2; do
+    stdio.stdout.write("FAIL:close-second-session"); return;
+  fi
+
+  session.send(4);
+  val zero_live = (await session.outputs.next()).value.unwrap();
+  if zero_live.value != 0; do
+    stdio.stdout.write("FAIL:retired-session-live"); return;
+  fi
+
+  other.send(9);
+  val other_stopped = (await other.outputs.next()).value.unwrap();
+  session.send(9);
+  val stopped = (await session.outputs.next()).value.unwrap();
+  await other.get_done();
+  await session.get_done();
+  if other_stopped.value != 0 || stopped.value != 0; do
+    stdio.stdout.write("FAIL:session-actor-shutdown"); return;
+  fi
+
+  stdio.stdout.write("browser:session-lifecycle-ok");
+  return;
+}
