@@ -121,12 +121,6 @@ private:
     static bool valid(const OresBrowserGuestSessionBindingV1& b) {
         return b.tenant_id != 0 && b.actor_id != 0 && b.generation != 0;
     }
-    static bool sameGuest(const OresBrowserGuestSessionBindingV1& a,
-                          const OresBrowserGuestSessionBindingV1& b) {
-        return a.tenant_id == b.tenant_id &&
-               a.actor_id == b.actor_id &&
-               a.generation == b.generation;
-    }
     static const OresBrowserHandle* token(const Entry& entry) {
         // Object pointer conversion only; never dereference as handle.
         return reinterpret_cast<const OresBrowserHandle*>(&entry.marker);
