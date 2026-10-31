@@ -9,6 +9,7 @@
 #include <memory>
 #include "ores_browser_ui_abi_v1.h"
 #include "ores_browser_ui_queue_v1.h"
+#include "ores_browser_snapshot_queue_v1.h"
 
 // QML -> UI bridge -> dedicated FFI thread -> Oreslang AOT library.
 // QObject classes expose UI state ONLY; they do not own browser state.
@@ -21,10 +22,11 @@ public slots:
     void submit(uint32_t operation, const QString &id,
                 const QString &generation, const QString &url);
     void shutdown();
+    void acknowledgeSnapshot(quint64 revision);
 signals:
     void ready(const QVariantList &tabs, const QString &activeId,
                const QString &activeGeneration, const QString &activeUrl,
-               bool back, bool forward);
+               bool back, bool forward, quint64 revision);
     void fatal(const QString &why);
     void rejected(const QString &why);
     void commandCompleted();
@@ -37,6 +39,7 @@ private:
     uint64_t last_revision_ = 0;
     bool have_revision_ = false;
     QByteArray last_wire_;
+    OresBrowserSnapshotQueueV1 snapshot_queue_;
     uint32_t (*abi_)() = nullptr;
     int32_t (*open_)(const OresBrowserConfig*, OresBrowserHandle**) = nullptr;
     int32_t (*dispatch_)(OresBrowserHandle*, const OresBrowserCommand*) = nullptr;
