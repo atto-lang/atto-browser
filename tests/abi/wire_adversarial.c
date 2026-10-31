@@ -9,6 +9,27 @@
 } while (0)
 
 int main(void) {
+  OresBrowserConfig config = {0};
+  config.struct_size = sizeof(config);
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  /* Check startup admission without allowing a malformed record to
+     influence tenant/session selection in a future Oreslang backend. */
+  if (!ores_browser_validate_config_v1(&config)) return 3;
+  config.private_session = 1u;
+  if (!ores_browser_validate_config_v1(&config)) return 4;
+  config.private_session = 2u;
+  if (ores_browser_validate_config_v1(&config)) return 5;
+  config.private_session = 0u;
+  config.reserved = 1u;
+  if (ores_browser_validate_config_v1(&config)) return 6;
+  config.reserved = 0u;
+  config.abi_version++;
+  if (ores_browser_validate_config_v1(&config)) return 7;
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  config.struct_size--;
+  if (ores_browser_validate_config_v1(&config)) return 8;
+  if (ores_browser_validate_config_v1(NULL)) return 9;
+
   OresBrowserSnapshot *snapshot =
       (OresBrowserSnapshot *)calloc(1u, sizeof(OresBrowserSnapshot));
   OresBrowserCommand command = {0};
