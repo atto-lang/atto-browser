@@ -12,7 +12,28 @@ int main(void) {
   OresBrowserSnapshot *snapshot =
       (OresBrowserSnapshot *)calloc(1u, sizeof(OresBrowserSnapshot));
   OresBrowserCommand command = {0};
+  OresBrowserConfig config = {0};
   if (!snapshot) return 2;
+  EXPECT(!ores_browser_validate_config_v1(NULL), "null-config");
+  EXPECT(!ores_browser_validate_config_v1(&config), "zero-config");
+  config.struct_size = sizeof(config);
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  EXPECT(ores_browser_validate_config_v1(&config), "valid-normal-config");
+  config.private_session = 1u;
+  EXPECT(ores_browser_validate_config_v1(&config), "valid-private-config");
+  config.private_session = 2u;
+  EXPECT(!ores_browser_validate_config_v1(&config), "nonboolean-private");
+  config.private_session = 0u;
+  config.reserved = 1u;
+  EXPECT(!ores_browser_validate_config_v1(&config), "smuggled-config-reserved");
+  config.reserved = 0u;
+  config.struct_size = 0u;
+  EXPECT(!ores_browser_validate_config_v1(&config), "config-size");
+  config.struct_size = sizeof(config);
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION + 1u;
+  EXPECT(!ores_browser_validate_config_v1(&config), "config-version");
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  EXPECT(ores_browser_validate_config_v1(&config), "restored-config");
   snapshot->struct_size = sizeof(*snapshot);
   snapshot->abi_version = ORES_BROWSER_UI_ABI_VERSION;
   snapshot->revision = 7u;
