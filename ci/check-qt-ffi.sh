@@ -16,7 +16,8 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
 "$tmp/abi-wire"
 # Execute the same UI-thread-only limiter used by the Qt bridge. This checks
-# saturation, non-wrapping counts and draining, not Qt event-loop behavior.
+# saturation, non-wrapping counts, draining and one-outstanding UI snapshot,
+# not Qt event-loop delivery behavior.
 c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue"
 "$tmp/ui-queue"
@@ -51,6 +52,10 @@ grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
 grep -Fq 'command_queue_.tryReserve()' desktop/qt/UiBridge.cpp
 grep -Fq 'OresBrowserUiQueueV1::captureFits' desktop/qt/UiBridge.cpp
 grep -Fq 'commandCompleted' desktop/qt/UiBridge.cpp
+grep -Fq 'view_gate_.pending()' desktop/qt/UiBridge.cpp
+grep -Fq 'view_gate_.tryReserve()' desktop/qt/UiBridge.cpp
+grep -Fq 'view_gate_.acknowledge()' desktop/qt/UiBridge.cpp
+grep -Fq 'worker->acknowledgeSnapshot()' desktop/qt/UiBridge.cpp
 grep -Fq 'textFormat: Text.PlainText' desktop/qt/Main.qml
 if grep -Eiq '(WebEngineView|import QtWebEngine|QtWebView|WKWebView|WebView2|Electron)' desktop/qt/Main.qml; then
   echo "FORBIDDEN_EMBEDDED_WEBVIEW" >&2
