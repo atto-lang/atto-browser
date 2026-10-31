@@ -42,7 +42,13 @@ int main() {
     CHECK(!table.resolve(a, &out) && !out.actor_id);
     CHECK(!table.retire(a, &out) && !out.actor_id);
     CHECK(table.resolve(b, &out) && out.tenant_id == 2);
+    c = a;
+    CHECK(!table.admit({1, 1, 1}, &c) && !c);
+    c = a;
+    CHECK(!table.admit({1, 1, 0}, &c) && !c);
     CHECK(table.admit({1, 1, 2}, &c) && c && c != a && c != b);
+    Handle* future = a;
+    CHECK(!table.admit({1, 1, 3}, &future) && !future);
     CHECK(!table.resolve(a, &out));
     CHECK(table.resolve(c, &out) && out.generation == 2);
 
