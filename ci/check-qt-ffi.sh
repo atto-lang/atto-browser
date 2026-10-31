@@ -16,19 +16,32 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
 "$tmp/abi-wire"
 # Execute the same UI-thread-only limiter used by the Qt bridge. This checks
-# saturation, non-wrapping counts and draining, not Qt event-loop behavior.
-c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+# saturation, non-wrapping counts, draining and one-outstanding UI snapshot,
+# not Qt event-loop delivery behavior.
+c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue"
 "$tmp/ui-queue"
-# A blocked UI must not accumulate arbitrary immutable snapshot copies.
-c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+# Revision-fenced worker-to-UI snapshot credit / replay refusal (host-only).
+c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/snapshot_queue_admission.cpp -o "$tmp/snapshot-queue"
 "$tmp/snapshot-queue"
+# If Clang is present, also execute the identical byte-boundary matrix under
+# memory and undefined-behavior sanitizers; a sanitizer failure is fatal.
+if command -v clang++ >/dev/null 2>&1; then
+  clang++ -std=c++17 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue-sanitize"
+  "$tmp/ui-queue-sanitize"
+  clang++ -std=c++17 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I include tests/abi/snapshot_queue_admission.cpp -o "$tmp/snapshot-queue-sanitize"
+  "$tmp/snapshot-queue-sanitize"
+fi
 # Compile/link integration acceptance, but NEVER run without pinned real
 # Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/backend_integration.c -ldl -o "$tmp/backend-ffi"
-echo "ABI_LAYOUT_WIRE_UI_QUEUE_AND_SNAPSHOT_BACKPRESSURE_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
+echo "ABI_LAYOUT_WIRE_UI_QUEUE_AND_REVISION_SNAPSHOT_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
 for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
     desktop/qt/UiBridge.cpp desktop/qt/Main.qml \
     desktop/qt/CMakeLists.txt include/ores_browser_ui_abi_v1.h; do
@@ -45,9 +58,12 @@ grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
 grep -Fq 'command_queue_.tryReserve()' desktop/qt/UiBridge.cpp
+grep -Fq 'OresBrowserUiQueueV1::captureFits' desktop/qt/UiBridge.cpp
 grep -Fq 'commandCompleted' desktop/qt/UiBridge.cpp
 grep -Fq 'snapshot_queue_.pending()' desktop/qt/UiBridge.cpp
-grep -Fq 'acknowledgeSnapshot(revision)' desktop/qt/UiBridge.cpp
+grep -Fq 'snapshot_queue_.tryReserve(last_revision_)' desktop/qt/UiBridge.cpp
+grep -Fq 'snapshot_queue_.acknowledge(revision)' desktop/qt/UiBridge.cpp
+grep -Fq 'worker->acknowledgeSnapshot(revision)' desktop/qt/UiBridge.cpp
 grep -Fq 'textFormat: Text.PlainText' desktop/qt/Main.qml
 if grep -Eiq '(WebEngineView|import QtWebEngine|QtWebView|WKWebView|WebView2|Electron)' desktop/qt/Main.qml; then
   echo "FORBIDDEN_EMBEDDED_WEBVIEW" >&2

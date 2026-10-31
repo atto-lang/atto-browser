@@ -7,11 +7,33 @@ permissions:
   contents: read
 jobs:
   static-source-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          # Avoid github.sha's synthetic pull_request merge commit. The
+          # evidence must describe the exact proposed, unmodified PR head.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify immutable source head and record tree
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          actual="$(git rev-parse --verify HEAD)"
+          [[ "$actual" == "$EXPECTED_HEAD" ]] || {
+            echo 'SOURCE_HEAD_MISMATCH' >&2; exit 1;
+          }
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]] || {
+            echo 'DIRTY_SOURCE_CHECKOUT' >&2; exit 1;
+          }
+          tree="$(git rev-parse --verify 'HEAD^{tree}')"
+          [[ "$tree" =~ ^[0-9a-f]{40}$ ]]
+          echo "STATIC_SOURCE_ONLY sha=$actual tree=$tree"
+          echo "Source-only checks (NOT compiler/Qt/guest evidence): \`$actual\` / \`$tree\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Source structure only (not native execution)
         run: sh ci/check-source.sh
       - name: Native harness shell syntax
