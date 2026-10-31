@@ -132,6 +132,7 @@ void BackendWorker::shutdown() {
     have_revision_ = false;
     last_revision_ = 0;
     last_wire_.clear();
+    view_gate_.acknowledge();
 }
 void BackendWorker::submit(uint32_t op, const QString &id,
                            const QString &generation, const QString &url) {
@@ -180,8 +181,14 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     }
     readSnapshot(); // Backend, not Qt, determines the resulting state.
 }
+void BackendWorker::acknowledgeSnapshot() {
+    // Always executes in the worker's own Qt thread via a queued call.
+    // No acknowledgement means the GUI has not consumed the last view.
+    if (!view_gate_.acknowledge()) return;
+    readSnapshot();  // Deliver the latest backend revision, if it changed.
+}
 void BackendWorker::readSnapshot() {
-    if (!handle_ || !snapshot_) return;
+    if (!handle_ || !snapshot_ || view_gate_.pending()) return;
     auto view = std::make_unique<OresBrowserSnapshot>();
     view->struct_size = sizeof(*view);
     view->abi_version = ORES_BROWSER_UI_ABI_VERSION;
@@ -249,6 +256,10 @@ void BackendWorker::readSnapshot() {
                             static_cast<qsizetype>(sizeof(*view)));
     last_revision_ = view->revision;
     have_revision_ = true;
+    if (!view_gate_.tryReserve()) {
+        failClosed(QStringLiteral("Duplicate pending UI snapshot"));
+        return;
+    }
     emit ready(tabs, activeId, activeGeneration, activeUrl, canBack, canForward);
 }
 
@@ -288,6 +299,11 @@ void UiBridge::start() {
         status_ = QStringLiteral("Connected to Oreslang backend");
         emit statusChanged();
         emit viewChanged();
+        // Complete the worker-owned one-view lease only after the GUI has
+        // processed this snapshot; a wedged GUI cannot accumulate views.
+        auto *worker = worker_;
+        if (worker) QMetaObject::invokeMethod(worker,
+            [worker] { worker->acknowledgeSnapshot(); }, Qt::QueuedConnection);
     });
     // Completion is delivered on the UI event loop, never on the FFI worker.
     // A wedged foreign call cannot free a reservation and flood this queue.
