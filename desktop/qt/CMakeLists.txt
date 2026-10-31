@@ -43,4 +43,16 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     set_tests_properties(qt_gui_backend_absent_fail_closed PROPERTIES
         TIMEOUT 12
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # Real Qt cross-thread event delivery around the production revision
+    # credit gate; no substitute backend is instantiated or loaded.
+    qt_add_executable(ores-browser-snapshot-ack-loop
+        tests/snapshot_ack_event_loop.cpp
+    )
+    target_include_directories(ores-browser-snapshot-ack-loop PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+    target_link_libraries(ores-browser-snapshot-ack-loop PRIVATE Qt6::Core)
+    add_test(NAME qt_snapshot_ack_event_loop
+        COMMAND ores-browser-snapshot-ack-loop)
+    set_tests_properties(qt_snapshot_ack_event_loop PROPERTIES TIMEOUT 10)
 endif()

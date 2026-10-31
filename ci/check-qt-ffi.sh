@@ -49,6 +49,7 @@ for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
 done
 grep -Fq 'qmlRegisterSingletonInstance(' desktop/qt/main.cpp
 grep -Fq 'qt_add_qml_module(' desktop/qt/CMakeLists.txt
+grep -Fq 'qt_snapshot_ack_event_loop' desktop/qt/CMakeLists.txt
 grep -Fq 'Qt::QueuedConnection' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
