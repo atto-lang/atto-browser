@@ -40,4 +40,24 @@ public:
 private:
     std::uint32_t pending_ = 0u;
 };
+// Worker-thread-only, one outstanding UI snapshot signal. The worker cannot
+// enqueue unbounded QVariant snapshots if the GUI event loop is delayed.
+// Qt's queued delivery of the GUI acknowledgement releases the reservation.
+class OresBrowserViewGateV1 final {
+public:
+    bool tryReserve() noexcept {
+        if (outstanding_) return false;
+        outstanding_ = true;
+        return true;
+    }
+    bool acknowledge() noexcept {
+        if (!outstanding_) return false;
+        outstanding_ = false;
+        return true;
+    }
+    bool pending() const noexcept { return outstanding_; }
+private:
+    bool outstanding_ = false;
+};
+
 #endif
