@@ -104,6 +104,20 @@ pub async routine main(): void {
     stdio.stdout.write("FAIL:wrong-generation-close"); return;
   fi
 
+  // An attacker may send a maximal positive integer on the fixture
+  // transport. It must neither overflow nor retire the live generation.
+  session.send(2147483647);
+  val oversized_close = (await session.outputs.next()).value.unwrap();
+  if oversized_close.value != -1; do
+    stdio.stdout.write("FAIL:oversized-session-close"); return;
+  fi
+
+  session.send(-1);
+  val negative_operation = (await session.outputs.next()).value.unwrap();
+  if negative_operation.value != -1; do
+    stdio.stdout.write("FAIL:negative-session-operation"); return;
+  fi
+
   session.send(2);
   val still_open = (await session.outputs.next()).value.unwrap();
   if still_open.value != 1; do
