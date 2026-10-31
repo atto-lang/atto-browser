@@ -4,10 +4,11 @@
  */
 #include "ores_browser_chrome_text_v1.h"
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 
 #define CHECK(x) do { if (!(x)) { \
-    fprintf(stderr, "CHROME_TEXT_FILTER_FAIL:%d:%s\\n", __LINE__, #x); \
+    fprintf(stderr, "CHROME_TEXT_FILTER_FAIL:%d:%s\n", __LINE__, #x); \
     return 1; \
 } } while (0)
 
@@ -29,7 +30,7 @@ int main(void) {
         0x205fu, 0x2070u, 0xfeffu - 1u,
         0xd83du, 0xde00u  /* valid pair: checkedUTF8 ensures pairing */
     };
-    unsigned i;
+    size_t i;
     for (i = 0; i < sizeof controls / sizeof controls[0]; ++i) {
         CHECK(ores_browser_chrome_disallowed_v1(controls[i]));
     }
