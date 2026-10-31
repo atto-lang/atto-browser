@@ -21,3 +21,19 @@ This PR is stacked on snapshot ACK PR #11 at immutable parent `ec82ce91b1254eb03
 5. OS process sandbox, site isolation, authenticated IPC and actor lifecycle security.
 
 **DRAFT / HOLD.** A zero-step Actions failure is NOT_EXECUTED, not a failing code test. Cross-org private source mirroring remains blocked by issue #4 until independent approval. No browser-completeness or production-security claim.
+
+## Follow-up: optional NEW_TAB URL boundary
+
+The initial integration accidentally allowed an optional URL at the wire
+validator while the Qt command capture gate rejected it and the worker did
+not encode the field. The bridge now accepts a bounded NEW_TAB URL in the
+pre-copy admission guard and encodes it as canonical UTF-8 in the worker.
+NAVIGATE still requires a nonempty URL, NEXT/PREV still forbid all URL bytes,
+all operations still enforce their tab capability shape. This is **not** URL
+canonicalization or origin authorization: the trusted Oreslang supervisor must
+perform those checks. The QML newTab() action still creates a blank tab; this
+correction makes the internal command boundary consistent with ABI v1.
+
+The unit suite now tests both optional URL admission and oversized rejection;
+CI grep checks ensure the worker does not revert to silently discarding it.
+No real Qt/guest execution evidence is implied by this source-only change.

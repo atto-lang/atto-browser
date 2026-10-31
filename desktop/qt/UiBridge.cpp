@@ -161,14 +161,20 @@ void BackendWorker::submit(uint32_t op, const QString &id,
             return;
         }
     }
-    if (op == ORES_BROWSER_CMD_NAVIGATE) {
+    // NEW_TAB admits a bounded optional initial URL, while NAVIGATE must
+    // supply one. A trusted Oreslang supervisor, not Qt, authorizes origins.
+    // Do not silently discard a NEW_TAB URL after queue admission.
+    if (op == ORES_BROWSER_CMD_NAVIGATE ||
+        op == ORES_BROWSER_CMD_NEW_TAB) {
         const QByteArray value = url.toUtf8();
-        if (value.isEmpty() || value.size() >= ORES_BROWSER_URL_BYTES ||
+        if ((op == ORES_BROWSER_CMD_NAVIGATE && value.isEmpty()) ||
+            value.size() >= ORES_BROWSER_URL_BYTES ||
             value.contains('\0') || QString::fromUtf8(value) != url) {
             emit rejected(QStringLiteral("Invalid address length or encoding"));
             return;
         }
-        std::memcpy(command.url, value.constData(), size_t(value.size()));
+        if (!value.isEmpty())
+            std::memcpy(command.url, value.constData(), size_t(value.size()));
         command.url[value.size()] = '\0';
     }
     if (!ores_browser_validate_command_v1(&command)) {
