@@ -38,6 +38,28 @@ int main() {
     }
     CHECK(q.pending() == 0u);
 
+    // A blocked/slow GUI can only have one outstanding revision across
+    // arbitrary worker poll/command iterations. Acknowledgement advances
+    // admission and a spurious/double acknowledgement does not underflow.
+    OresBrowserViewGateV1 view;
+    CHECK(!view.pending());
+    CHECK(!view.acknowledge());
+    CHECK(view.tryReserve());
+    CHECK(view.pending());
+    for (unsigned i = 0; i < 100000u; ++i) {
+        CHECK(!view.tryReserve());
+        CHECK(view.pending());
+    }
+    CHECK(view.acknowledge());
+    CHECK(!view.pending());
+    CHECK(!view.acknowledge());
+    for (unsigned i = 0; i < 1024u; ++i) {
+        CHECK(view.tryReserve());
+        CHECK(!view.tryReserve());
+        CHECK(view.acknowledge());
+        CHECK(!view.pending());
+    }
+
     // Lengths are checked *before* capturing QString arguments into Qt's
     // queued lambda. A hostile text field cannot enqueue arbitrary megabytes.
     using Q = OresBrowserUiQueueV1;
