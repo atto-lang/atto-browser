@@ -61,6 +61,9 @@ int main(int argc, char **argv) {
   CloseFn close_session = NULL;
   OresBrowserConfig config = {0};
   OresBrowserHandle *browser = NULL;
+  OresBrowserHandle *other = NULL;
+  OresBrowserHandle *rejected_handle = NULL;
+  OresBrowserConfig bad_config = {0};
   OresBrowserCommand cmd = {0};
   OresBrowserSnapshot *view;
   uint64_t revision, first_id, first_gen, second_id, second_gen;
@@ -76,13 +79,34 @@ int main(int argc, char **argv) {
   if (version() != ORES_BROWSER_UI_ABI_VERSION) die("backend ABI version");
   config.struct_size = (uint32_t)sizeof(config);
   config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  bad_config = config;
+  bad_config.reserved = 1u;
+  if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
+      rejected_handle != NULL)
+    die("backend accepted nonzero reserved config");
+  bad_config = config;
+  bad_config.struct_size = 0u;
+  if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
+      rejected_handle != NULL)
+    die("backend accepted invalid config size");
+  bad_config = config;
+  bad_config.abi_version = ORES_BROWSER_UI_ABI_VERSION + 1u;
+  if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
+      rejected_handle != NULL)
+    die("backend accepted unsupported ABI version");
   if (open_session(&config, &browser) != ORES_BROWSER_OK || !browser)
     die("backend open (requires trusted fresh test session)");
+  if (open_session(&config, &other) != ORES_BROWSER_OK || !other ||
+      browser == other)
+    die("backend concurrent sessions alias or second open refused");
   view = (OresBrowserSnapshot*)calloc(1u, sizeof(*view));
   if (!view) die("test allocation");
   snapshot(read, browser, view, 0u);
   if (view->tab_count != 0u) die("test session must start with zero tabs");
   revision = view->revision;
+  snapshot(read, other, view, 0u);
+  if (view->tab_count != 0u)
+    die("second session must start independently empty");
   command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
   if (dispatch(browser, &cmd) != ORES_BROWSER_OK) die("create first tab");
   snapshot(read, browser, view, revision);
@@ -127,8 +151,18 @@ int main(int argc, char **argv) {
   if (!find_tab(view, second_id) || find_tab(view, second_id)->active != 1u)
     die("remaining tab lost");
   close_session(browser);
+  snapshot(read, other, view, 0u);
+  if (view->tab_count != 0u)
+    die("closing first session damaged second session");
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  if (dispatch(other, &cmd) != ORES_BROWSER_OK)
+    die("second session unusable after first close");
+  snapshot(read, other, view, 0u);
+  if (view->tab_count != 1u || view->tabs[0].active != 1u)
+    die("second session state corrupted by first retirement");
+  close_session(other);
   free(view);
   if (dlclose(library) != 0) die("backend dynamic library unload");
-  puts("BROWSER_REAL_BACKEND_FFI_PASS two-tabs stale-reject snapshot");
+  puts("BROWSER_REAL_BACKEND_FFI_PASS independent-sessions malformed-config two-tabs stale-reject snapshot");
   return 0;
 }
