@@ -37,3 +37,21 @@ correction makes the internal command boundary consistent with ABI v1.
 The unit suite now tests both optional URL admission and oversized rejection;
 CI grep checks ensure the worker does not revert to silently discarding it.
 No real Qt/guest execution evidence is implied by this source-only change.
+
+## FFI source-origin admission gate (2026-10-31)
+
+The previous `ci/verify-backend-ffi.sh` accepted a different checkout SHA when
+caller-provided source tree and checkout pins matched. That checks identity but
+**not independent security approval**. Until approval issue #4 is resolved,
+non-original checkout commits and non-origin GitHub Actions repository IDs are
+now explicitly rejected before any backend is loaded. A source-origin exact
+SHA is still required. `ci/check-backend-origin-admission.sh` is a fail-closed
+four-case denial test (missing pin, matching-tree mirror, unauthorized Actions
+repository, and original checkout with no backend). It never runs an FFI library.
+
+A later independently authorized mirror requires a separate reviewed change,
+bound to the exact approved destination ID/tree and retention rules; simply
+setting `EXPECTED_SOURCE_TREE` or `EXPECTED_CHECKOUT_SHA` is insufficient.
+The native FFI script now reports **ABI behavior** only, explicitly requiring
+separate LLVM compiler-origin/codegen attestation before runtime certification.
+The origin gate does not itself establish true backend provenance.
