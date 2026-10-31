@@ -289,6 +289,10 @@ void UiBridge::start() {
         emit statusChanged();
         emit viewChanged();
     });
+    // Completion is delivered on the UI event loop, never on the FFI worker.
+    // A wedged foreign call cannot free a reservation and flood this queue.
+    connect(worker_, &BackendWorker::commandCompleted, this,
+            [this] { command_queue_.complete(); });
     connect(worker_, &BackendWorker::rejected, this,
             [this](const QString &message) {
         status_ = message;
@@ -315,10 +319,20 @@ void UiBridge::start() {
 void UiBridge::submit(uint32_t op, const QString &id,
                       const QString &generation, const QString &url) {
     if (!worker_ || !connected_) return;
+    if (!command_queue_.tryReserve()) {
+        status_ = QStringLiteral("UI command queue full; retry after backend responds");
+        emit statusChanged();
+        return;
+    }
     auto *worker = worker_;
-    QMetaObject::invokeMethod(worker, [worker, op, id, generation, url] {
-        worker->submit(op, id, generation, url);
-    }, Qt::QueuedConnection);
+    if (!QMetaObject::invokeMethod(worker, [worker, op, id, generation, url] {
+            worker->submit(op, id, generation, url);
+            emit worker->commandCompleted();
+        }, Qt::QueuedConnection)) {
+        command_queue_.complete();
+        status_ = QStringLiteral("Cannot queue Oreslang backend command");
+        emit statusChanged();
+    }
 }
 void UiBridge::newTab() { submit(ORES_BROWSER_CMD_NEW_TAB); }
 void UiBridge::selectTab(const QString &id, const QString &generation) {
