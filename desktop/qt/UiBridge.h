@@ -21,6 +21,7 @@ public slots:
     void submit(uint32_t operation, const QString &id,
                 const QString &generation, const QString &url);
     void shutdown();
+    void acknowledgeSnapshot();
 signals:
     void ready(const QVariantList &tabs, const QString &activeId,
                const QString &activeGeneration, const QString &activeUrl,
@@ -33,6 +34,7 @@ private:
     void failClosed(const QString &message);
     std::unique_ptr<QLibrary> lib_;
     QTimer *poll_ = nullptr;
+    OresBrowserViewGateV1 view_gate_;
     OresBrowserHandle *handle_ = nullptr;
     uint64_t last_revision_ = 0;
     bool have_revision_ = false;
