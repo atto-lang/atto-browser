@@ -162,6 +162,13 @@ int main(int argc, char **argv) {
   if (!find_tab(view, second_id) || find_tab(view, second_id)->active != 1u)
     die("remaining tab lost");
   close_session(browser);
+  // The retired pointer is never dereferenced by this host test. The real
+  // backend must reject it by registry identity before accessing guest state.
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  status = dispatch(browser, &cmd);
+  if (status == ORES_BROWSER_OK) die("retired session dispatch admitted");
+  if (read(browser, view) == ORES_BROWSER_OK)
+    die("retired session snapshot admitted");
   snapshot(read, other, view, 0u);
   if (view->tab_count != 0u)
     die("closing first session damaged second session");
