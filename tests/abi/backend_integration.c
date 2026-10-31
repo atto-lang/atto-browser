@@ -79,23 +79,34 @@ int main(int argc, char **argv) {
   if (version() != ORES_BROWSER_UI_ABI_VERSION) die("backend ABI version");
   config.struct_size = (uint32_t)sizeof(config);
   config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  if (open_session(&config, &browser) != ORES_BROWSER_OK || !browser)
+    die("backend open (requires trusted fresh test session)");
+  // Start the output slot non-NULL. Invalid OPEN must actively clear a
+  // previously populated output slot; leaving it unchanged is unsafe.
+  rejected_handle = browser;
   bad_config = config;
   bad_config.reserved = 1u;
   if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
       rejected_handle != NULL)
     die("backend accepted nonzero reserved config");
+  rejected_handle = browser;
   bad_config = config;
   bad_config.struct_size = 0u;
   if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
       rejected_handle != NULL)
     die("backend accepted invalid config size");
+  rejected_handle = browser;
   bad_config = config;
   bad_config.abi_version = ORES_BROWSER_UI_ABI_VERSION + 1u;
   if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
       rejected_handle != NULL)
     die("backend accepted unsupported ABI version");
-  if (open_session(&config, &browser) != ORES_BROWSER_OK || !browser)
-    die("backend open (requires trusted fresh test session)");
+  rejected_handle = browser;
+  bad_config = config;
+  bad_config.private_session = 2u;
+  if (open_session(&bad_config, &rejected_handle) != ORES_BROWSER_INVALID ||
+      rejected_handle != NULL)
+    die("backend accepted invalid private-session flag");
   if (open_session(&config, &other) != ORES_BROWSER_OK || !other ||
       browser == other)
     die("backend concurrent sessions alias or second open refused");
