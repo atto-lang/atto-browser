@@ -132,6 +132,7 @@ void BackendWorker::shutdown() {
     have_revision_ = false;
     last_revision_ = 0;
     last_wire_.clear();
+    snapshot_queue_.reset();
 }
 void BackendWorker::submit(uint32_t op, const QString &id,
                            const QString &generation, const QString &url) {
@@ -181,7 +182,9 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     readSnapshot(); // Backend, not Qt, determines the resulting state.
 }
 void BackendWorker::readSnapshot() {
-    if (!handle_ || !snapshot_) return;
+    // A stalled UI loop may not drain queued ready() signals. Never enqueue
+    // a second expensive QVariant snapshot until the first is acknowledged.
+    if (!handle_ || !snapshot_ || snapshot_queue_.pending()) return;
     auto view = std::make_unique<OresBrowserSnapshot>();
     view->struct_size = sizeof(*view);
     view->abi_version = ORES_BROWSER_UI_ABI_VERSION;
@@ -249,7 +252,22 @@ void BackendWorker::readSnapshot() {
                             static_cast<qsizetype>(sizeof(*view)));
     last_revision_ = view->revision;
     have_revision_ = true;
-    emit ready(tabs, activeId, activeGeneration, activeUrl, canBack, canForward);
+    if (!snapshot_queue_.tryReserve(last_revision_)) {
+        failClosed(QStringLiteral("Snapshot admission invariant violated"));
+        return;
+    }
+    emit ready(tabs, activeId, activeGeneration, activeUrl,
+               canBack, canForward, last_revision_);
+}
+
+void BackendWorker::acknowledgeSnapshot(quint64 revision) {
+    if (!handle_) return; // Failed/closed worker never restarts on an old ACK.
+    if (!snapshot_queue_.acknowledge(revision)) {
+        failClosed(QStringLiteral("Invalid browser snapshot acknowledgment"));
+        return;
+    }
+    // Read the newest actor-owned state, not a potentially stale queued copy.
+    readSnapshot();
 }
 
 UiBridge::UiBridge(QObject *parent) : QObject(parent) {}
@@ -277,7 +295,7 @@ void UiBridge::start() {
     connect(worker_, &BackendWorker::ready, this,
             [this](const QVariantList &tabs, const QString &id,
                    const QString &generation, const QString &url,
-                   bool back, bool forward) {
+                   bool back, bool forward, quint64 revision) {
         tabs_ = tabs;
         activeId_ = id;
         activeGeneration_ = generation;
@@ -288,6 +306,23 @@ void UiBridge::start() {
         status_ = QStringLiteral("Connected to Oreslang backend");
         emit statusChanged();
         emit viewChanged();
+        // ACK only after the UI has consumed the snapshot, and only on the
+        // worker thread. A frozen UI retains one credit indefinitely.
+        auto *worker = worker_;
+        if (!QMetaObject::invokeMethod(worker, [worker, revision] {
+                worker->acknowledgeSnapshot(revision);
+            }, Qt::QueuedConnection)) {
+            connected_ = false;
+            tabs_.clear();
+            activeId_.clear();
+            activeGeneration_.clear();
+            activeUrl_.clear();
+            canBack_ = canForward_ = false;
+            status_ = QStringLiteral("Cannot acknowledge browser snapshot");
+            emit connectedChanged();
+            emit statusChanged();
+            emit viewChanged();
+        }
     });
     // Completion is delivered on the UI event loop, never on the FFI worker.
     // A wedged foreign call cannot free a reservation and flood this queue.
