@@ -48,8 +48,15 @@ public:
         std::lock_guard<std::mutex> guard(mu_);
         if (next_ >= entries_.size()) return false;
         for (std::size_t i = 0; i < next_; ++i) {
-            if (entries_[i].live && sameGuest(entries_[i].binding, binding))
-                return false;  // no two live C handles for one guest actor
+            const Entry& previous = entries_[i];
+            if (previous.binding.tenant_id == binding.tenant_id &&
+                previous.binding.actor_id == binding.actor_id) {
+                // A guest actor has at most one live session generation.
+                // Reopening after retirement requires a strictly newer one.
+                if (previous.live ||
+                    binding.generation <= previous.binding.generation)
+                    return false;
+            }
         }
         Entry& entry = entries_[next_++];
         entry.binding = binding;
@@ -92,7 +99,8 @@ public:
                 if (!entry.live) return false;
                 *output = entry.binding;
                 entry.live = false;
-                entry.binding = {};
+                // Keep this spent actor identity as a non-reusable high-water
+                // mark. Resolution still returns nothing for retired handles.
                 return true;
             }
         }
