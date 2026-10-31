@@ -19,6 +19,19 @@ static inline int ores_browser_zero_bytes_v1(const void *data, size_t n) {
   return 1;
 }
 
+/* Validate typed ABI v1 opening metadata before actor allocation.
+ * This is only structural validation, NOT caller/tenant authentication.
+ * The native export must clear a valid output slot on each failed OPEN.
+ */
+static inline int ores_browser_validate_config_v1(
+    const OresBrowserConfig *config) {
+  return config != NULL &&
+         config->struct_size == sizeof(*config) &&
+         config->abi_version == ORES_BROWSER_UI_ABI_VERSION &&
+         config->private_session <= 1u &&
+         config->reserved == 0u;
+}
+
 /* Require a terminator, and canonical zero padding after first NUL.
  * UTF-8 correctness and bidirectional control protection are checked
  * separately by the Qt presentation boundary and trusted Oreslang host.
