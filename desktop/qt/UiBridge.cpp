@@ -35,13 +35,12 @@ bool validStatus(int32_t status) {
 // Security-critical browser-chrome URL text may not contain direction
 // overrides, isolate controls, or invisible ASCII/C1 control characters.
 bool safeChromeUrl(const QString &value) {
-    for (QChar c : value) {
-        const ushort u = c.unicode();
-        if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
-            (u >= 0x202au && u <= 0x202eu) ||
-            (u >= 0x2066u && u <= 0x2069u)) return false;
-    }
-    return true;
+    // Match the C ABI chrome-URL gate exactly, including bidi marks that
+    // would otherwise render as invisible address-bar text.
+    const QByteArray bytes = value.toUtf8();
+    return bytes.size() < ORES_BROWSER_URL_BYTES &&
+           ores_browser_chrome_url_v1(bytes.constData(),
+                                     static_cast<size_t>(bytes.size() + 1));
 }
 // Webpage titles are never authority. Replace dangerous controls for
 // display rather than allowing untrusted page content to kill the browser.
@@ -49,8 +48,11 @@ QString safeDisplayTitle(QString value) {
     for (qsizetype i = 0; i < value.size(); ++i) {
         const ushort u = value.at(i).unicode();
         if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
-            (u >= 0x202au && u <= 0x202eu) ||
-            (u >= 0x2066u && u <= 0x2069u)) {
+            u == 0x00adu || u == 0x034fu || u == 0x061cu ||
+            u == 0x180eu || u == 0x200bu || u == 0x200eu ||
+            u == 0x200fu || (u >= 0x2028u && u <= 0x202eu) ||
+            u == 0x2060u || (u >= 0x2066u && u <= 0x206fu) ||
+            u == 0xfeffu) {
             value[i] = QChar(0xfffdu);
         }
     }
