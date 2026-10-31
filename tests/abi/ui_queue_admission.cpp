@@ -66,6 +66,12 @@ int main() {
     CHECK(Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, 0));
     CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 1, 0, 0));
     CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, 1));
+    CHECK(Q::captureFits(ORES_BROWSER_CMD_NEXT_TAB, 0, 0, 0));
+    CHECK(Q::captureFits(ORES_BROWSER_CMD_PREVIOUS_TAB, 0, 0, 0));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEXT_TAB, 1, 0, 0));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEXT_TAB, 0, 1, 0));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_PREVIOUS_TAB, 0, 0, 1));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_PREVIOUS_TAB, 1, 1, 0));
     CHECK(Q::captureFits(ORES_BROWSER_CMD_SELECT_TAB, 20, 20, 0));
     CHECK(!Q::captureFits(ORES_BROWSER_CMD_SELECT_TAB, 21, 20, 0));
     CHECK(!Q::captureFits(ORES_BROWSER_CMD_SELECT_TAB, 20, 21, 0));

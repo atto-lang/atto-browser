@@ -20,7 +20,11 @@ public:
             op > ORES_BROWSER_CMD_PREVIOUS_TAB ||
             id > 20u || generation > 20u || 
             url >= ORES_BROWSER_URL_BYTES) return false;
-        if (op == ORES_BROWSER_CMD_NEW_TAB) {
+        // NEW/NEXT/PREVIOUS select a browser session, not a tab capability.
+        // The worker and native actor separately validate each operation.
+        if (op == ORES_BROWSER_CMD_NEW_TAB ||
+            op == ORES_BROWSER_CMD_NEXT_TAB ||
+            op == ORES_BROWSER_CMD_PREVIOUS_TAB) {
             return id == 0u && generation == 0u && url == 0u;
         }
         if (id == 0u || generation == 0u) return false;

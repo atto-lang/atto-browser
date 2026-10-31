@@ -71,6 +71,9 @@ grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
 grep -Fq 'ores_browser_validate_snapshot_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
+grep -Fq 'ores_browser_validate_config_v1(&config)' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_NEXT_TAB);' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_PREVIOUS_TAB);' desktop/qt/UiBridge.cpp
 grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
