@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QDebug>
 #include "ores_browser_wire_validate_v1.h"
+#include "ores_browser_chrome_text_v1.h"
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -33,13 +34,11 @@ bool validStatus(int32_t status) {
     return status >= ORES_BROWSER_OK && status <= ORES_BROWSER_INTERNAL;
 }
 // Security-critical browser-chrome URL text may not contain direction
-// overrides, isolate controls, or invisible ASCII/C1 control characters.
+// controls, invisible formatting code points, or C0/C1 characters.
 bool safeChromeUrl(const QString &value) {
     for (QChar c : value) {
         const ushort u = c.unicode();
-        if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
-            (u >= 0x202au && u <= 0x202eu) ||
-            (u >= 0x2066u && u <= 0x2069u)) return false;
+        if (ores_browser_chrome_disallowed_v1(u)) return false;
     }
     return true;
 }
@@ -48,9 +47,7 @@ bool safeChromeUrl(const QString &value) {
 QString safeDisplayTitle(QString value) {
     for (qsizetype i = 0; i < value.size(); ++i) {
         const ushort u = value.at(i).unicode();
-        if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
-            (u >= 0x202au && u <= 0x202eu) ||
-            (u >= 0x2066u && u <= 0x2069u)) {
+        if (ores_browser_chrome_disallowed_v1(u)) {
             value[i] = QChar(0xfffdu);
         }
     }
