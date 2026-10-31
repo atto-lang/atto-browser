@@ -20,6 +20,11 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic \
 cc -std=c11 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/chrome_control_matrix.c -o "$tmp/chrome-text"
 "$tmp/chrome-text"
+# The exact same anti-spoofing policy header also compiles as C++17,
+# as used by the Qt bridge. Do not silently rely on C-only extensions.
+c++ -x c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/chrome_control_matrix.c -o "$tmp/chrome-text-cpp"
+"$tmp/chrome-text-cpp"
 if command -v clang >/dev/null 2>&1; then
   clang -std=c11 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic \
     -fsanitize=address,undefined -fno-omit-frame-pointer \
