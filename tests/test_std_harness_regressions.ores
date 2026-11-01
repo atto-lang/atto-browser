@@ -9,10 +9,15 @@ fnc stale_generation_focus_denied(): TestOutcome {
   return expect_false(may_focus_tab(3, 3, 7, 7, 10, 9, true, true, true),
     "trusted gesture cannot bypass generation mismatch");
 }
+fnc private_session_never_persists(): TestOutcome {
+  return expect_false(may_persist_tab_session(1, 1, 5, 5, true, true, true, true),
+    "private browsing state must not be serialized to session restore");
+}
 pub routine main(): void {
   val TestSuite suite = new TestSuite("browser-policy", arr[
     new TestCase("cross_tenant_tab_open_denied", cross_tenant_tab_open_denied, false, ""),
-    new TestCase("stale_generation_focus_denied", stale_generation_focus_denied, false, "")
+    new TestCase("stale_generation_focus_denied", stale_generation_focus_denied, false, ""),
+    new TestCase("private_session_never_persists", private_session_never_persists, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
