@@ -23,13 +23,25 @@ fnc tab_limit_is_fail_closed(): TestOutcome {
     "tabs cannot exceed configured window quota");
 }
 
+fnc untrusted_chrome_focus_gesture_is_rejected(): TestOutcome {
+  return expect_false(may_focus_tab(3, 3, 7, 7, 10, 10, true, true, false),
+    "renderer-controlled focus must not impersonate trusted tab-strip input");
+}
+
+fnc nonprivate_persistence_with_unlocked_storage_is_allowed(): TestOutcome {
+  return expect_true(may_persist_tab_session(1, 1, 5, 5, false, false, true, true),
+    "same-tenant nonprivate session restore is allowed with explicit enablement");
+}
+
 pub routine main(): void {
   val TestSuite suite = new TestSuite("browser-policy", arr[
     new TestCase("cross_tenant_tab_open_denied", cross_tenant_tab_open_denied, false, ""),
     new TestCase("stale_generation_focus_denied", stale_generation_focus_denied, false, ""),
     new TestCase("private_session_never_persists", private_session_never_persists, false, ""),
     new TestCase("trusted_same_tenant_open_is_admitted", trusted_same_tenant_open_is_admitted, false, ""),
-    new TestCase("tab_limit_is_fail_closed", tab_limit_is_fail_closed, false, "")
+    new TestCase("tab_limit_is_fail_closed", tab_limit_is_fail_closed, false, ""),
+    new TestCase("untrusted_chrome_focus_gesture_is_rejected", untrusted_chrome_focus_gesture_is_rejected, false, ""),
+    new TestCase("nonprivate_persistence_with_unlocked_storage_is_allowed", nonprivate_persistence_with_unlocked_storage_is_allowed, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
