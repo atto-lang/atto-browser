@@ -1,0 +1,21 @@
+import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "std/testing";
+import fnc expect_true, expect_false, expect_equal_int, expect_equal_string, expect_near_float, run_suite, require_success, fail from "std/testing";
+import fnc may_open_tab, may_focus_tab, may_persist_tab_session from "../src/desktop/tab_policy";
+fnc cross_tenant_tab_open_denied(): TestOutcome {
+  return expect_false(may_open_tab(1, 2, 1, 1, 0, 8, true, false, false),
+    "cross-tenant tab creation must fail closed");
+}
+fnc stale_generation_focus_denied(): TestOutcome {
+  return expect_false(may_focus_tab(3, 3, 7, 7, 10, 9, true, true, true),
+    "trusted gesture cannot bypass generation mismatch");
+}
+pub routine main(): void {
+  val TestSuite suite = new TestSuite("browser-policy", arr[
+    new TestCase("cross_tenant_tab_open_denied", cross_tenant_tab_open_denied, false, ""),
+    new TestCase("stale_generation_focus_denied", stale_generation_focus_denied, false, "")
+  ]);
+  val TestOptions options = new TestOptions("", false, true);
+  val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
+  require_success(rt borrow summary);
+  return;
+}
