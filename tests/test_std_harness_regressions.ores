@@ -1,5 +1,5 @@
-import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "std/testing";
-import fnc expect_true, expect_false, expect_equal_int, expect_equal_string, expect_near_float, run_suite, require_success, fail from "std/testing";
+import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "ores.std/testing";
+import fnc expect_true, expect_false, expect_equal_int, expect_equal_string, expect_near_float, run_suite, require_success, fail from "ores.std/testing";
 import fnc may_open_tab, may_focus_tab, may_persist_tab_session from "../src/desktop/tab_policy";
 fnc cross_tenant_tab_open_denied(): TestOutcome {
   return expect_false(may_open_tab(1, 2, 1, 1, 0, 8, true, false, false),
