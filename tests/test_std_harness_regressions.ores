@@ -13,11 +13,23 @@ fnc private_session_never_persists(): TestOutcome {
   return expect_false(may_persist_tab_session(1, 1, 5, 5, true, true, true, true),
     "private browsing state must not be serialized to session restore");
 }
+fnc trusted_same_tenant_open_is_admitted(): TestOutcome {
+  return expect_true(may_open_tab(4, 4, 9, 9, 0, 8, true, false, false),
+    "live same-tenant same-profile nonprivate tab should be admitted");
+}
+
+fnc tab_limit_is_fail_closed(): TestOutcome {
+  return expect_false(may_open_tab(4, 4, 9, 9, 8, 8, true, false, false),
+    "tabs cannot exceed configured window quota");
+}
+
 pub routine main(): void {
   val TestSuite suite = new TestSuite("browser-policy", arr[
     new TestCase("cross_tenant_tab_open_denied", cross_tenant_tab_open_denied, false, ""),
     new TestCase("stale_generation_focus_denied", stale_generation_focus_denied, false, ""),
-    new TestCase("private_session_never_persists", private_session_never_persists, false, "")
+    new TestCase("private_session_never_persists", private_session_never_persists, false, ""),
+    new TestCase("trusted_same_tenant_open_is_admitted", trusted_same_tenant_open_is_admitted, false, ""),
+    new TestCase("tab_limit_is_fail_closed", tab_limit_is_fail_closed, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
