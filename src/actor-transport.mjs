@@ -7,6 +7,9 @@ import {encodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
 // Captured intrinsic accessors cannot be shadowed by an untrusted typed-array
 // instance's own .buffer, .byteOffset or .byteLength properties.
+// View metadata is validated through native slots. Snapshot via a captured
+// intrinsic too: Uint8Array.from invokes replaceable Symbol.iterator hooks.
+const copyNative=Function.prototype.call.bind(Uint8Array.prototype.set);
 const taPrototype=Object.getPrototypeOf(Uint8Array.prototype);
 const taBuffer=Object.getOwnPropertyDescriptor(taPrototype,"buffer").get;
 const taOffset=Object.getOwnPropertyDescriptor(taPrototype,"byteOffset").get;
@@ -85,7 +88,8 @@ export function createActorMessageTransport({
    viewInfo?new Uint8Array(viewInfo.buffer,viewInfo.offset,viewInfo.length):null;
   if(!view||!view.byteLength||view.byteLength>16*1024*1024)
    fail("actor guest Wasm byte budget");
-  guestBytes=Uint8Array.from(view);
+  guestBytes=new Uint8Array(view.byteLength);
+  copyNative(guestBytes,view);
  }
  // Generation-fenced local actor lease. No second Worker with the same
  // supervisor-provided actor identity can be spawned while retirement is
