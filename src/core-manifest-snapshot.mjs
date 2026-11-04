@@ -15,7 +15,12 @@ export function snapshotCoreManifest(original) {
       return value;
     }
     if(value===null||typeof value==='boolean')return value;
-    if(typeof value==='number'&&Number.isFinite(value))return value;
+    if(typeof value==='number'&&Number.isFinite(value)) {
+      // JSON.stringify would silently normalize -0 to 0 and round unsafe
+      // integers; reject noncanonical numeric authority before snapshotting.
+      if(Object.is(value,-0)||(Number.isInteger(value)&&!Number.isSafeInteger(value)))invalid();
+      return value;
+    }
     if(typeof value!=='object'||seen.has(value))invalid();
     seen.add(value);
     const proto=Object.getPrototypeOf(value);
