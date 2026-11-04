@@ -449,6 +449,40 @@ test("detached active frame cannot prevent cancellation cleanup",async()=>{
  assert.equal(terminated,1);
 });
 
+
+test("terminal receipt scrubs owned DATA despite poisoned fill and shadowed metadata",async()=>{
+ let receive,held,reported=0,terminations=0;
+ const original=Uint8Array.prototype.fill;
+ const factory=()=>({
+  addEventListener(k,cb){if(k==="message")receive=cb;},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-v2-init")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-ready"}}));
+   if(msg.kind==="oreslang-v2-data"){
+    held=msg.frame;
+    Object.defineProperty(held,"buffer",{get(){throw Error("untrusted buffer getter")}});
+    Object.defineProperty(held,"byteLength",{get(){throw Error("untrusted length getter")}});
+    Uint8Array.prototype.fill=function(){throw Error("replaced fill");};
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-receipt",id:msg.id,ok:true}}));
+   }
+   if(msg.kind==="oreslang-v2-control")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-stopped"}}));
+  },
+  terminate(){terminations++;}
+ });
+ try {
+  const actor=createActorMessageTransport({...spec,workerFactory:factory,
+   onSupervisorPanic(){reported++;}});
+  assert.equal(await actor.send(["scrub",42n]),true);
+  await actor.drain();
+  assert.ok(held && Uint8Array.prototype.every.call(held,v=>v===0),
+   "owned frame must be cleared with captured native fill");
+  assert.equal(reported,0);
+  assert.equal(terminations,1);
+ }finally{Uint8Array.prototype.fill=original;}
+});
+
 test("canonical INIT rejects malformed and overdeep shapes before allocating a Worker",()=>{
  let allocations=0;
  const factory=()=>{allocations++;throw Error("worker must not allocate")};
