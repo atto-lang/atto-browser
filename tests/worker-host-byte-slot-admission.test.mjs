@@ -61,3 +61,23 @@ test("Worker byte snapshot never consumes an untrusted Uint8Array iterator",asyn
  assert.equal(iteratorCalls,0,'byte snapshot must not run guest iterator');
  assert.equal(factoryCalls,1,'valid raw bytes reached Worker factory');
 });
+
+test("Worker preflight ignores spoofed DataView slots and getter traps",async()=>{
+ const input=Uint8Array.from([255,0,97,115,109,1,0,0,0,255]);
+ const view=new DataView(input.buffer,1,8);
+ Object.defineProperty(view,"byteOffset",{value:0});
+ Object.defineProperty(view,"byteLength",{value:10});
+ Object.defineProperty(view,"buffer",{get(){throw Error("untrusted buffer getter");}});
+ let created=0;
+ await assert.rejects(runVerifiedCoreGuestInWorker({
+  wasmBytes:view,manifest:{},maxModuleBytes:8,
+  workerFactory(){created++;throw Error("validated DataView reached Worker factory");}
+ }),/validated DataView reached Worker factory/);
+ assert.equal(created,1,"genuine 8-byte slice must pass preflight");
+});
+
+test("spoofed DataView byte length cannot bypass Worker preflight budget",async()=>{
+ const view=new DataView(new ArrayBuffer(65));
+ Object.defineProperty(view,"byteLength",{value:8});
+ await expectPreflightDenial(view,/Wasm module exceeds host byte budget/,64);
+});
