@@ -9,6 +9,8 @@ const fail=x=>{throw new TypeError("Oreslang Worker: "+x)};
 // Capture native internal-slot getters: instanceof and the public view.buffer
 // accessor can both be forged, including on a SharedArrayBuffer-backed view.
 const ordinaryBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+// Uint8Array.from reads an overrideable @@iterator on guest-supplied views.
+const copyNative=Function.prototype.call.bind(Uint8Array.prototype.set);
 const typedViewPrototype=Object.getPrototypeOf(Uint8Array.prototype);
 const typedViewBuffer=Object.getOwnPropertyDescriptor(typedViewPrototype,"buffer").get;
 const typedViewOffset=Object.getOwnPropertyDescriptor(typedViewPrototype,"byteOffset").get;
@@ -34,8 +36,10 @@ function snapshotBytes(input,maxModuleBytes){
   bytes=new Uint8Array(buffer,offset,length);
  }else fail("expected Wasm ArrayBuffer or typed array");
  if(bytes.byteLength>maxModuleBytes)fail("Wasm module exceeds host byte budget");
- // Non-shared bytes are snapshotted before any async work or Worker creation.
- return Uint8Array.from(bytes);
+ // Copy raw internal slots without invoking an untrusted @@iterator.
+ const snapshot=new Uint8Array(bytes.byteLength);
+ copyNative(snapshot,bytes);
+ return snapshot;
 }
 function validInt(x,min,max,name){
  if(!Number.isSafeInteger(x)||x<min||x>max)fail("invalid "+name);

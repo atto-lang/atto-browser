@@ -48,3 +48,16 @@ test("reject an object inheriting ArrayBuffer.prototype without an ArrayBuffer s
  const forged=Object.create(ArrayBuffer.prototype);
  await expectPreflightDenial(forged,/expected Wasm ArrayBuffer or typed array/);
 });
+
+test("Worker byte snapshot never consumes an untrusted Uint8Array iterator",async()=>{
+ const view=Uint8Array.from([0,97,115,109,1,0,0,0]);
+ let iteratorCalls=0,factoryCalls=0;
+ Object.defineProperty(view,Symbol.iterator,{value:function*(){
+   iteratorCalls++;throw Error('untrusted byte iterator executed');
+ }});
+ await assert.rejects(runVerifiedCoreGuestInWorker({wasmBytes:view,manifest:{},maxModuleBytes:64,
+   workerFactory(){factoryCalls++;throw Error('worker factory reached after safe copy');}
+ }),/worker factory reached after safe copy/);
+ assert.equal(iteratorCalls,0,'byte snapshot must not run guest iterator');
+ assert.equal(factoryCalls,1,'valid raw bytes reached Worker factory');
+});
