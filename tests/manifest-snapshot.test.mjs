@@ -94,3 +94,12 @@ test("array manifest length is read from own descriptor, not attacker Proxy get 
   }});
   assert.deepEqual(snapshotCoreManifest(spoofed),[1,2]);
 });
+
+test("browser manifest never silently normalizes noncanonical numeric fields",()=>{
+ for(const unsafe of [-0,9007199254740992,-9007199254740992,1e25]){
+  assert.throws(()=>snapshotCoreManifest({...manifest(),wasmBytes:unsafe}),/serialization/);
+ }
+ for(const number of [0,1,Number.MAX_SAFE_INTEGER,0.5]){
+  assert.equal(snapshotCoreManifest({value:number}).value,number);
+ }
+});
