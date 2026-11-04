@@ -120,3 +120,19 @@ test("invalid void-terminating adapter retains identity fence after rejection",(
   workerFactory:()=>{throw Error("should not allocate")}}),
   /incarnation still active or termination unconfirmed/);
 });
+
+test("forged typed-array and DataView buffer getters cannot conceal shared guest Wasm backing",()=>{
+  if(typeof SharedArrayBuffer!=="function")return;
+  let allocated=0;
+  for(const supplied of [new Uint8Array(new SharedArrayBuffer(8)),new DataView(new SharedArrayBuffer(8))]) {
+    // The old admission used supplied.buffer, which can be shadowed.
+    Object.defineProperty(supplied,"buffer",{get(){return new ArrayBuffer(8)}});
+    Object.defineProperty(supplied,"byteOffset",{get(){return 0}});
+    Object.defineProperty(supplied,"byteLength",{get(){return 8}});
+    assert.throws(()=>createActorMessageTransport({...spec,
+      guest:{wasmBytes:supplied,manifest:{}},actorKey:"browser/reject-shared-"+allocated,
+      workerFactory(){allocated++;throw Error("unsafe Worker allocation");}}),
+      /actor guest shared memory forbidden/);
+  }
+  assert.equal(allocated,0,"reject hidden SharedArrayBuffer before spawning Worker");
+});
