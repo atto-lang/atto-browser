@@ -46,7 +46,7 @@ export async function loadOreslangWasm(bytes,{
   if(inspected.memoryCount!==1||!inspected.hasMemoryMaximum)throw new Error("Oreslang ABI needs one bounded module memory");
  }
  const clockRequested=Array.prototype.includes.call(requested,"clock");
- const clockProvider=host.clockMs;
+ const clockProvider=clockRequested ? host.clockMs : undefined;
  if(clockRequested && typeof clockProvider!=="function"){
   throw new Error("clock requested but no host.clockMs provider supplied");
  }
