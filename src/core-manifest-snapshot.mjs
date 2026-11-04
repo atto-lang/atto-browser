@@ -44,7 +44,10 @@ export function snapshotCoreManifest(original) {
     if(keys.length>32)invalid();
     const copy=Object.create(null);
     for(const key of keys){
-      if(typeof key!=='string'||key.length>128)invalid();
+      // A downstream JSON consumer might Object.assign parsed manifest keys.
+      // Refuse prototype-magic names even though this local snapshot is null-proto.
+      if(typeof key!=='string'||key.length>128||
+         key==='__proto__'||key==='prototype'||key==='constructor')invalid();
       textUnits+=key.length;
       if(textUnits>4096)invalid();
       const entry=Object.getOwnPropertyDescriptor(value,key);
