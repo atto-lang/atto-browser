@@ -1,8 +1,13 @@
 import {inspectWasmBytes} from "./inspect.mjs";
 const KNOWN = new Set(["clock"]);
 function checkList(name,value) {
- if(!Array.isArray(value)||value.some((x,i)=>typeof x!=="string"||!KNOWN.has(x)||value.indexOf(x)!==i)){
-  throw new TypeError(name+" must be a unique list of supported capabilities");
+ if(!Array.isArray(value))throw new TypeError(name+" must be a unique list of supported capabilities");
+ const seen=new Set();
+ for(let i=0;i<value.length;i++){
+  const x=value[i];
+  if(typeof x!=="string"||!KNOWN.has(x)||seen.has(x))
+   throw new TypeError(name+" must be a unique list of supported capabilities");
+  seen.add(x);
  }
 }
 export async function loadOreslangWasm(bytes,{
@@ -16,7 +21,7 @@ export async function loadOreslangWasm(bytes,{
  checkList("requestedCapabilities",requestedCapabilities);
  checkList("grantedCapabilities",grantedCapabilities);
  for(const capability of requestedCapabilities){
-  if(!grantedCapabilities.includes(capability))throw new Error("capability not granted by host: "+capability);
+  if(!Array.prototype.includes.call(grantedCapabilities,capability))throw new Error("capability not granted by host: "+capability);
  }
  const inspected=inspectWasmBytes(bytes,{maxModuleBytes,maxMemoryPages});
  const module=new WebAssembly.Module(inspected.bytes);
@@ -33,7 +38,7 @@ export async function loadOreslangWasm(bytes,{
   }
   if(inspected.memoryCount!==1||!inspected.hasMemoryMaximum)throw new Error("Oreslang ABI needs one bounded module memory");
  }
- const clockRequested=requestedCapabilities.includes("clock");
+ const clockRequested=Array.prototype.includes.call(requestedCapabilities,"clock");
  if(clockRequested && typeof host.clockMs!=="function"){
   throw new Error("clock requested but no host.clockMs provider supplied");
  }
@@ -42,7 +47,7 @@ export async function loadOreslangWasm(bytes,{
   clock_ms:()=>{
    // Enforcement must happen *inside the host function*, even if guest
    // code calls initialization exports to manipulate its own capability bits.
-   if(!clockRequested||!grantedCapabilities.includes("clock"))throw new Error("clock capability denied");
+   if(!clockRequested||!Array.prototype.includes.call(grantedCapabilities,"clock"))throw new Error("clock capability denied");
    const value=host.clockMs();
    if(typeof value!=="number"||!Number.isFinite(value)||value<0)
     throw new TypeError("clock provider must return finite, nonnegative milliseconds");
