@@ -128,3 +128,15 @@ test("nested arrays and producer metadata refuse noncanonical numbers",()=>{
   assert.deepEqual(snapshot,{outer:[{inner:Number.MAX_SAFE_INTEGER},0.125]});
   assert.equal(Object.isFrozen(snapshot.outer[0]),true);
 });
+
+test('manifest object keys reject controls and bidi spoofing at every depth',()=>{
+  for(const codepoint of [0,9,10,0x7f,0x85,0x2028,0x202e,0x2066,0x2069]){
+    const key='backend'+String.fromCodePoint(codepoint)+'forged';
+    const nested=Object.create(null);
+    Object.defineProperty(nested,key,{value:'wasm',enumerable:true});
+    assert.throws(()=>snapshotCoreManifest(nested),/serialization/);
+    assert.throws(()=>snapshotCoreManifest({producer:[nested]}),/serialization/);
+  }
+  const plain=snapshotCoreManifest({producer:{compiler:'Compilador Å/测试'}});
+  assert.equal(plain.producer.compiler,'Compilador Å/测试');
+});
