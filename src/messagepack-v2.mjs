@@ -7,17 +7,37 @@ const encoder=new TextEncoder(), decoder=new TextDecoder("utf-8",{fatal:true});
 const PREFIX="oreslang.actor.shape.v2/",MAX_BYTES=1048576,MAX_NODES=100000,MAX_DEPTH=64,MAX_DESC=4096;
 const MIN=-(1n<<63n),MAX=(1n<<63n)-1n;
 const err=s=>{throw new TypeError("Oreslang MessagePack v2: "+s)};
-const isShared=x=>typeof SharedArrayBuffer!=="undefined"&&x instanceof SharedArrayBuffer;
-// Admit size BEFORE copying attacker-owned data. An oversized buffer must
-// never consume its own length again as a second, unbounded allocation.
+// Read native slots, never caller-controlled getters or typed-array iterators.
+const abLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+const sabLength=typeof SharedArrayBuffer==="function"?
+ Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,"byteLength").get:null;
+const taProto=Object.getPrototypeOf(Uint8Array.prototype);
+const taSlot=name=>Object.getOwnPropertyDescriptor(taProto,name).get;
+const dvSlot=name=>Object.getOwnPropertyDescriptor(DataView.prototype,name).get;
+const taBacking=taSlot("buffer"),taOffset=taSlot("byteOffset"),taLength=taSlot("byteLength");
+const dvBacking=dvSlot("buffer"),dvOffset=dvSlot("byteOffset"),dvLength=dvSlot("byteLength");
+const nativeCopy=Function.prototype.call.bind(Uint8Array.prototype.set);
+const sharedBacking=x=>{
+ if(!sabLength)return false;
+ try{sabLength.call(x);return true}catch{return false}
+};
 const byteCopy=(b,maxBytes)=>{
- if(isShared(b)||ArrayBuffer.isView(b)&&isShared(b.buffer))err("shared memory is forbidden");
- let view;
- if(b instanceof ArrayBuffer)view=new Uint8Array(b);
- else if(ArrayBuffer.isView(b))view=new Uint8Array(b.buffer,b.byteOffset,b.byteLength);
- else err("expected nonshared binary");
- if(view.byteLength>maxBytes)err("frame byte budget");
- return Uint8Array.from(view);
+ if(sharedBacking(b))err("shared memory is forbidden");
+ let backing,offset=0,length;
+ try{length=abLength.call(b);backing=b}
+ catch{
+  if(!ArrayBuffer.isView(b))err("expected nonshared binary");
+  try{backing=taBacking.call(b);offset=taOffset.call(b);length=taLength.call(b)}
+  catch{
+   try{backing=dvBacking.call(b);offset=dvOffset.call(b);length=dvLength.call(b)}
+   catch{err("expected nonshared binary")}
+  }
+ }
+ if(sharedBacking(backing))err("shared memory is forbidden");
+ if(length>maxBytes)err("frame byte budget");
+ const snapshot=new Uint8Array(length);
+ nativeCopy(snapshot,new Uint8Array(backing,offset,length));
+ return snapshot;
 };
 function schema(id,desc){
  if(typeof id!=="string"||!/^[\x21-\x7e]{1,256}$/.test(id))err("invalid schema ID");
