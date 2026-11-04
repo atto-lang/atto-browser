@@ -44,6 +44,17 @@ test("unknown grants, duplicates, malformed buffers and precompiled modules reje
  await assert.rejects(()=>loadOreslangWasm("not wasm",config),/expected a Wasm/);
  await assert.rejects(()=>loadOreslangWasm(new WebAssembly.Module(bytes),config),/cannot be inspected/);
 });
+test("forged capability array methods cannot grant clock or hide duplicates",async()=>{
+ const fakeGrants=[];fakeGrants.includes=()=>true;
+ await assert.rejects(()=>loadOreslangWasm(bytes,{...config,grantedCapabilities:fakeGrants}),/not granted/);
+ const duplicates=["clock","clock"];duplicates.indexOf=(_,index)=>index;
+ await assert.rejects(()=>loadOreslangWasm(bytes,{...config,grantedCapabilities:duplicates}),/unique list/);
+ const requested=["clock"];requested.includes=()=>false;
+ const legitimateGrants=["clock"];legitimateGrants.includes=()=>false;
+ const rt=await loadOreslangWasm(bytes,{...config,requestedCapabilities:requested,grantedCapabilities:legitimateGrants});
+ assert.equal(rt.instance.exports.run_clock(),42);
+});
+
 test("unknown imported host module rejected",async()=>{
  const bad=bytes.slice();
  const from=new TextEncoder().encode("ores_host"),to=new TextEncoder().encode("evil_host");
