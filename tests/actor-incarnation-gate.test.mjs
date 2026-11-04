@@ -136,3 +136,17 @@ test("forged typed-array and DataView buffer getters cannot conceal shared guest
   }
   assert.equal(allocated,0,"reject hidden SharedArrayBuffer before spawning Worker");
 });
+
+test("compiled actor guest snapshot cannot run caller-controlled Uint8Array iterator",()=>{
+ const source=guest().wasmBytes;
+ let calls=0,factories=0;
+ Object.defineProperty(source,Symbol.iterator,{value:function*(){
+  calls++;throw Error("untrusted Wasm iterator");
+ }});
+ assert.throws(()=>createActorMessageTransport({...spec,
+  guest:{wasmBytes:source,manifest:{}},actorKey:"browser/native-copy-test",
+  workerFactory(){factories++;throw Error("factory reached after owned byte snapshot");}
+ }),/factory reached after owned byte snapshot/);
+ assert.equal(calls,0);
+ assert.equal(factories,1);
+});
