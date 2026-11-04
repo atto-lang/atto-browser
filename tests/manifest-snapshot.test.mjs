@@ -103,3 +103,15 @@ test("browser manifest never silently normalizes noncanonical numeric fields",()
   assert.equal(snapshotCoreManifest({value:number}).value,number);
  }
 });
+
+test("nested arrays and producer metadata refuse noncanonical numbers",()=>{
+  for(const value of [-0,Number.MAX_SAFE_INTEGER+1,-Number.MAX_SAFE_INTEGER-1]){
+    assert.throws(()=>snapshotCoreManifest({outer:[{inner:value}]}),/serialization/);
+    const m=manifest();
+    m.producer.buildNumber=value;
+    assert.throws(()=>snapshotCoreManifest(m),/serialization/);
+  }
+  const snapshot=snapshotCoreManifest({outer:[{inner:Number.MAX_SAFE_INTEGER},0.125]});
+  assert.deepEqual(snapshot,{outer:[{inner:Number.MAX_SAFE_INTEGER},0.125]});
+  assert.equal(Object.isFrozen(snapshot.outer[0]),true);
+});
