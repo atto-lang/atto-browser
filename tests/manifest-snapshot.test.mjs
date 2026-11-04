@@ -80,3 +80,17 @@ test("manifest snapshot makes nested plain data immutable before caller mutation
  assert.equal(Object.isFrozen(snapshot.memory),true);
  assert.equal(Object.isFrozen(snapshot.requiredCapabilities),true);
 });
+
+test("array manifest length is read from own descriptor, not attacker Proxy get trap",()=>{
+  let reads=0;
+  const array=new Proxy([1,2],{
+    get(target,key,receiver){if(key==='length'){reads++;throw Error('forged length get');}return Reflect.get(target,key,receiver);}
+  });
+  assert.deepEqual(snapshotCoreManifest(array),[1,2]);
+  assert.equal(reads,0);
+  const spoofed=new Proxy([1,2],{get(target,key,receiver){
+    if(key==='length')return 0;
+    return Reflect.get(target,key,receiver);
+  }});
+  assert.deepEqual(snapshotCoreManifest(spoofed),[1,2]);
+});
