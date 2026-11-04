@@ -21,11 +21,13 @@ export function snapshotCoreManifest(original) {
     const proto=Object.getPrototypeOf(value);
     const isArray=Array.isArray(value);
     if(isArray){
-      if(proto!==Array.prototype||value.length>32)invalid();
+      const lengthDescriptor=Object.getOwnPropertyDescriptor(value,'length');
+      const length=lengthDescriptor?.value;
+      if(proto!==Array.prototype||!Number.isSafeInteger(length)||length>32||length<0)invalid();
       const keys=Reflect.ownKeys(value);
-      if(keys.length!==value.length+1)invalid();
+      if(keys.length!==length+1)invalid();
       const copy=[];
-      for(let i=0;i<value.length;i++){
+      for(let i=0;i<length;i++){
         const entry=Object.getOwnPropertyDescriptor(value,String(i));
         if(!entry||!Object.hasOwn(entry,'value'))invalid();
         copy.push(walk(entry.value,depth+1));
