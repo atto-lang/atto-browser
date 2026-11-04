@@ -162,3 +162,15 @@ test("an inherited or own fake iterator cannot rewrite capability authority",asy
     grantedCapabilities:["clock"],host:{clockMs:()=>42}}),/unique list/);
  assert.equal(entryGetterReads,0);
 });
+
+test("unrequested clock providers are not inspected during admission",async()=>{
+ let getterCalls=0;
+ const host={};
+ Object.defineProperty(host,"clockMs",{get(){
+   getterCalls++;throw Error("unrequested provider getter");
+ }});
+ const rt=await loadOreslangWasm(bytes,{requestedCapabilities:[],
+   grantedCapabilities:[],host});
+ assert.equal(getterCalls,0);
+ assert.throws(()=>rt.instance.exports.run_clock(),/clock capability denied/);
+});
