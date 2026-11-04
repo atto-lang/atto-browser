@@ -15,6 +15,11 @@ c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
 "$tmp/abi-wire"
+# Verify canonical UTF-8, bidi/format-control denial, and zero-padding
+# at both NAVIGATE and snapshot chrome URL boundaries (host-only).
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/chrome_url_adversarial.c -o "$tmp/abi-chrome-url"
+"$tmp/abi-chrome-url"
 # Compile/link integration acceptance, but NEVER run without pinned real
 # Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
@@ -32,6 +37,7 @@ grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
 grep -Fq 'ores_browser_validate_snapshot_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
+grep -Fq 'ores_browser_chrome_url_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
