@@ -30,13 +30,21 @@ function viewBacking(view){
 /* Worker adapters may detach/transfer postMessage frames. A failed scrub
  * must never abort terminalization, release the incarnation lease early, or
  * turn a successful receipt into a second actor execution. */
+// Scrubbing must not depend on a mutable fill prototype or shadowed view slots.
+const scrubNative=Function.prototype.call.bind(Uint8Array.prototype.fill);
 function scrubOwned(value) {
  if(value===null||value===undefined)return;
  try {
-  const bytes=value instanceof ArrayBuffer?new Uint8Array(value):
-   ArrayBuffer.isView(value)?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):null;
-  if(bytes&&!(typeof SharedArrayBuffer!=="undefined"&&bytes.buffer instanceof SharedArrayBuffer))
-   bytes.fill(0);
+  let backing,offset=0,length;
+  if(isRealBacking(abLength,value)){
+   backing=value;length=abLength.call(value);
+  }else{
+   const slots=viewBacking(value);
+   if(!slots)return;
+   ({buffer:backing,offset,length}=slots);
+  }
+  if(!isRealBacking(abLength,backing)||isRealBacking(sabLength,backing))return;
+  scrubNative(new Uint8Array(backing,offset,length),0);
  }catch{
   // Detached host allocations can no longer be read or written.
  }
