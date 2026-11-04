@@ -5,6 +5,25 @@
  */
 import {encodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
+// Captured intrinsic accessors cannot be shadowed by an untrusted typed-array
+// instance's own .buffer, .byteOffset or .byteLength properties.
+const taPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const taBuffer=Object.getOwnPropertyDescriptor(taPrototype,"buffer").get;
+const taOffset=Object.getOwnPropertyDescriptor(taPrototype,"byteOffset").get;
+const taLength=Object.getOwnPropertyDescriptor(taPrototype,"byteLength").get;
+const dvBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dvOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const dvLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
+const abLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+const sabLength=typeof SharedArrayBuffer==="function"?
+ Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,"byteLength").get:null;
+const isRealBacking=(getter,value)=>{try{getter?.call(value);return !!getter}catch{return false}};
+function viewBacking(view){
+ if(!ArrayBuffer.isView(view))return null;
+ try{return {buffer:taBuffer.call(view),offset:taOffset.call(view),length:taLength.call(view)}}
+ catch{return {buffer:dvBuffer.call(view),offset:dvOffset.call(view),length:dvLength.call(view)}}
+}
+
 /* Worker adapters may detach/transfer postMessage frames. A failed scrub
  * must never abort terminalization, release the incarnation lease early, or
  * turn a successful receipt into a second actor execution. */
@@ -57,12 +76,13 @@ export function createActorMessageTransport({
      !guest.manifest||typeof guest.manifest!=="object")
    fail("compiled actor guest requires i64 descriptor and manifest");
   const supplied=guest.wasmBytes;
-  if(typeof SharedArrayBuffer!=="undefined"&&
-     (supplied instanceof SharedArrayBuffer||
-      ArrayBuffer.isView(supplied)&&supplied.buffer instanceof SharedArrayBuffer))
+  const viewInfo=ArrayBuffer.isView(supplied)?viewBacking(supplied):null;
+  // Check actual internal backing slots, never replaceable .buffer accessors.
+  if(isRealBacking(sabLength,supplied)||
+     (viewInfo&&isRealBacking(sabLength,viewInfo.buffer)))
    fail("actor guest shared memory forbidden");
-  const view=supplied instanceof ArrayBuffer?new Uint8Array(supplied):
-   ArrayBuffer.isView(supplied)?new Uint8Array(supplied.buffer,supplied.byteOffset,supplied.byteLength):null;
+  const view=isRealBacking(abLength,supplied)?new Uint8Array(supplied):
+   viewInfo?new Uint8Array(viewInfo.buffer,viewInfo.offset,viewInfo.length):null;
   if(!view||!view.byteLength||view.byteLength>16*1024*1024)
    fail("actor guest Wasm byte budget");
   guestBytes=Uint8Array.from(view);
