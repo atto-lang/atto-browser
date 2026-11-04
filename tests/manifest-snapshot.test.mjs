@@ -103,3 +103,16 @@ test("browser manifest never silently normalizes noncanonical numeric fields",()
   assert.equal(snapshotCoreManifest({value:number}).value,number);
  }
 });
+
+test('browser manifest refuses prototype-magic keys at any nesting level',()=>{
+  for(const key of ['__proto__','prototype','constructor']){
+    const top=Object.create(null);
+    Object.defineProperty(top,key,{value:{admin:true},enumerable:true,configurable:true});
+    assert.throws(()=>snapshotCoreManifest(top),/serialization/,key);
+    const nested={manifest:top};
+    assert.throws(()=>snapshotCoreManifest(nested),/serialization/,'nested '+key);
+  }
+  assert.equal(({}).admin,undefined,'no prototype mutation during admission');
+  assert.deepEqual({...snapshotCoreManifest({name:'core',version:1})},
+    {name:'core',version:1});
+});
