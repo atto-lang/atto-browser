@@ -1,4 +1,6 @@
 const ordinaryBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+// Do not consume caller-supplied Symbol.iterator when copying a validated view.
+const copyNative=Function.prototype.call.bind(Uint8Array.prototype.set);
 function isOrdinaryBuffer(buffer){
  try{ordinaryBufferLength.call(buffer);return true;}catch{return false;}
 }
@@ -36,7 +38,9 @@ export function inspectWasmBytes(input,{maxModuleBytes=1048576,maxMemoryPages=32
  if(bytes.byteLength>maxModuleBytes)throw new Error("Wasm module exceeds maximum byte size");
  // Snapshot any supplied view before inspecting; never validate bytes that can
  // change between admission and WebAssembly.Module compilation (TOCTOU).
- bytes=Uint8Array.from(bytes);
+ const owned=new Uint8Array(bytes.byteLength);
+ copyNative(owned,bytes);
+ bytes=owned;
  const fail=message=>{throw new Error("Wasm admission denied: "+message)};
  if(bytes.length<8||bytes[0]!==0||bytes[1]!==97||bytes[2]!==115||bytes[3]!==109||
     bytes[4]!==1||bytes[5]!==0||bytes[6]!==0||bytes[7]!==0)fail("invalid core module header");
