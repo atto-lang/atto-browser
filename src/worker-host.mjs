@@ -90,6 +90,7 @@ export function runVerifiedCoreGuestInWorker({
   };
   const onError=()=>settle(new Error("isolated Wasm worker failed"));
   const onMessage=event=>{
+   try {
    const data=event?.data;
    if(!data||data.kind!=="oreslang-core-result-v1"||typeof data.ok!=="boolean")
     return settle(new Error("invalid isolated Wasm worker response"));
@@ -101,6 +102,11 @@ export function runVerifiedCoreGuestInWorker({
    if(value<-(1n<<63n)||value>(1n<<63n)-1n)
     return settle(new Error("out-of-range signed i64 Worker result"));
    settle(null,value);
+   } catch {
+    // Synthetic or misbehaving Worker event accessors must settle the promise,
+    // never escape as an uncaught message handler exception.
+    settle(new Error("invalid isolated Wasm worker response"));
+   }
   };
   try{
    worker=create();
