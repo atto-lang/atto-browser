@@ -6,15 +6,35 @@ import {snapshotCoreManifest} from "./core-manifest-snapshot.mjs";
  */
 const signedI64=/^(?:0|-?[1-9][0-9]*)$/;
 const fail=x=>{throw new TypeError("Oreslang Worker: "+x)};
+// Capture native internal-slot getters: instanceof and the public view.buffer
+// accessor can both be forged, including on a SharedArrayBuffer-backed view.
+const ordinaryBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+const typedViewPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const typedViewBuffer=Object.getOwnPropertyDescriptor(typedViewPrototype,"buffer").get;
+const typedViewOffset=Object.getOwnPropertyDescriptor(typedViewPrototype,"byteOffset").get;
+const typedViewLength=Object.getOwnPropertyDescriptor(typedViewPrototype,"byteLength").get;
+const dataViewBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dataViewOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const dataViewLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
+function isOrdinaryBuffer(value) {
+ try { ordinaryBufferLength.call(value); return true; } catch { return false; }
+}
 function snapshotBytes(input,maxModuleBytes){
  let bytes;
- if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
+ if(isOrdinaryBuffer(input))bytes=new Uint8Array(input);
  else if(ArrayBuffer.isView(input)) {
-  if(typeof SharedArrayBuffer!=="undefined" && input.buffer instanceof SharedArrayBuffer)
-   fail("shared memory not admitted");
-  bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
+  let buffer,offset,length;
+  try {
+   const dataView=input instanceof DataView;
+   buffer=(dataView?dataViewBuffer:typedViewBuffer).call(input);
+   offset=(dataView?dataViewOffset:typedViewOffset).call(input);
+   length=(dataView?dataViewLength:typedViewLength).call(input);
+  }catch{fail("invalid or detached Wasm byte view")}
+  if(!isOrdinaryBuffer(buffer))fail("shared memory not admitted");
+  bytes=new Uint8Array(buffer,offset,length);
  }else fail("expected Wasm ArrayBuffer or typed array");
  if(bytes.byteLength>maxModuleBytes)fail("Wasm module exceeds host byte budget");
+ // Non-shared bytes are snapshotted before any async work or Worker creation.
  return Uint8Array.from(bytes);
 }
 function validInt(x,min,max,name){
