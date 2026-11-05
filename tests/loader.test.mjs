@@ -174,3 +174,17 @@ test("unrequested clock providers are not inspected during admission",async()=>{
  assert.equal(getterCalls,0);
  assert.throws(()=>rt.instance.exports.run_clock(),/clock capability denied/);
 });
+
+
+test("requested clock accessor and inherited providers are denied without execution",async()=>{
+ let reads=0;
+ const accessor={};
+ Object.defineProperty(accessor,"clockMs",{get(){reads++;throw Error("accessor executed");}});
+ await assert.rejects(()=>loadOreslangWasm(bytes,{requestedCapabilities:["clock"],
+   grantedCapabilities:["clock"],host:accessor}),/clock requested but no host.clockMs provider/);
+ assert.equal(reads,0);
+ const inherited=Object.create({clockMs:()=>42});
+ await assert.rejects(()=>loadOreslangWasm(bytes,{requestedCapabilities:["clock"],
+   grantedCapabilities:["clock"],host:inherited}),/clock requested but no host.clockMs provider/);
+ assert.equal(reads,0);
+});
