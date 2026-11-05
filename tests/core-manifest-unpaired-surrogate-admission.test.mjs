@@ -16,7 +16,8 @@ test("malformed UTF-16 cannot be admitted as manifest keys or data strings",()=>
 test("well-formed surrogate pairs and visible Unicode keys survive without normalizing identity",()=>{
  const input={"clé🚀":"ready🚀",nested:["🚀","é","e\u0301"]};
  const snapshot=snapshotCoreManifest(input);
- assert.deepEqual(snapshot,input);
+ assert.deepEqual({...snapshot},input);
+ assert.equal(Object.getPrototypeOf(snapshot),null);
  assert.equal(Object.isFrozen(snapshot),true);
  assert.equal(Object.isFrozen(snapshot.nested),true);
  assert.equal(snapshot.nested[2],"e\u0301");
