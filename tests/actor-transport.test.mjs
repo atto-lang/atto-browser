@@ -21,7 +21,7 @@ test("browser codec is byte-identical to canonical upstream Wasm codec",async()=
  const b=await readFile(new URL("../src/messagepack-v2.mjs",import.meta.url));
  const header=Buffer.from("blob "+b.length+"\0","utf8");
  assert.equal(createHash("sha1").update(header).update(b).digest("hex"),
-  "4b5c4b22f276dadcb1cfac99f7eac00e2e45023f");
+  "6f313b148bfb7d7dfcc71cc399a8243f91ce0084");
 });
 test("isolated Worker processes bounded canonical actor DATA; drain seals mailbox",async()=>{
  const actor=createActorMessageTransport({...spec,workerFactory,capacity:3});
@@ -447,6 +447,40 @@ test("detached active frame cannot prevent cancellation cleanup",async()=>{
  await assert.rejects(actor.stop(),/cancelled/);
  assert.equal(actor.pending,0);
  assert.equal(terminated,1);
+});
+
+
+test("terminal receipt scrubs owned DATA despite poisoned fill and shadowed metadata",async()=>{
+ let receive,held,reported=0,terminations=0;
+ const original=Uint8Array.prototype.fill;
+ const factory=()=>({
+  addEventListener(k,cb){if(k==="message")receive=cb;},
+  removeEventListener(){},
+  postMessage(msg){
+   if(msg.kind==="oreslang-v2-init")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-ready"}}));
+   if(msg.kind==="oreslang-v2-data"){
+    held=msg.frame;
+    Object.defineProperty(held,"buffer",{get(){throw Error("untrusted buffer getter")}});
+    Object.defineProperty(held,"byteLength",{get(){throw Error("untrusted length getter")}});
+    Uint8Array.prototype.fill=function(){throw Error("replaced fill");};
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-receipt",id:msg.id,ok:true}}));
+   }
+   if(msg.kind==="oreslang-v2-control")
+    queueMicrotask(()=>receive({data:{kind:"oreslang-v2-stopped"}}));
+  },
+  terminate(){terminations++;}
+ });
+ try {
+  const actor=createActorMessageTransport({...spec,workerFactory:factory,
+   onSupervisorPanic(){reported++;}});
+  assert.equal(await actor.send(["scrub",42n]),true);
+  await actor.drain();
+  assert.ok(held && Uint8Array.prototype.every.call(held,v=>v===0),
+   "owned frame must be cleared with captured native fill");
+  assert.equal(reported,0);
+  assert.equal(terminations,1);
+ }finally{Uint8Array.prototype.fill=original;}
 });
 
 test("canonical INIT rejects malformed and overdeep shapes before allocating a Worker",()=>{

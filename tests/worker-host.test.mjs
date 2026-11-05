@@ -170,3 +170,32 @@ test("oversized Wasm inputs are rejected before any snapshot allocation or worke
  }
  assert.equal(spawned,false);
 });
+
+test("Worker signed i64 exact min max and overflow responses are distinct",async()=>{
+  const replyFactory=value=>{
+    let onMessage,terminations=0;
+    return {
+      get terminations(){return terminations},
+      factory:()=>({
+        addEventListener(kind,listener){if(kind==="message")onMessage=listener;},
+        removeEventListener(){},
+        postMessage(){onMessage({data:{kind:"oreslang-core-result-v1",ok:true,value}});},
+        terminate(){terminations++;}
+      })
+    };
+  };
+  for(const value of ["-9223372036854775808","9223372036854775807"]){
+    const worker=replyFactory(value);
+    assert.equal(await runVerifiedCoreGuestInWorker({
+      wasmBytes:wasm,manifest:artifact,workerFactory:worker.factory
+    }),BigInt(value));
+    assert.equal(worker.terminations,1);
+  }
+  for(const value of ["-9223372036854775809","9223372036854775808"]){
+    const worker=replyFactory(value);
+    await assert.rejects(runVerifiedCoreGuestInWorker({
+      wasmBytes:wasm,manifest:artifact,workerFactory:worker.factory
+    }),/out-of-range signed i64 Worker result/);
+    assert.equal(worker.terminations,1);
+  }
+});

@@ -47,7 +47,7 @@ export function snapshotCoreManifest(original) {
       // A downstream JSON consumer might Object.assign parsed manifest keys.
       // Refuse prototype-magic names even though this local snapshot is null-proto.
       if(typeof key!=='string'||key.length>128||
-         /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069]/.test(key)||
+         /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u.test(key)||
          key==='__proto__'||key==='prototype'||key==='constructor')invalid();
       textUnits+=key.length;
       if(textUnits>4096)invalid();
