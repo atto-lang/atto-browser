@@ -6,12 +6,14 @@
 export function snapshotCoreManifest(original) {
   const invalid=()=>{throw new Error('invalid browser core Wasm manifest serialization')};
   const seen=new WeakSet();
-  let nodes=0,textUnits=0;
+  const encoder=new TextEncoder();
+  let nodes=0,textBytes=0;
   const walk=(value,depth)=>{
     if(++nodes>128||depth>5)invalid();
     if(typeof value==='string'){
-      textUnits+=value.length;
-      if(textUnits>4096)invalid();
+      if(value.length>4096)invalid(); // Avoid unbounded encoding work.
+      textBytes+=encoder.encode(value).length;
+      if(textBytes>4096)invalid();
       return value;
     }
     if(value===null||typeof value==='boolean')return value;
@@ -49,8 +51,8 @@ export function snapshotCoreManifest(original) {
       if(typeof key!=='string'||key.length>128||
          /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u.test(key)||
          key==='__proto__'||key==='prototype'||key==='constructor')invalid();
-      textUnits+=key.length;
-      if(textUnits>4096)invalid();
+      textBytes+=encoder.encode(key).length;
+      if(textBytes>4096)invalid();
       const entry=Object.getOwnPropertyDescriptor(value,key);
       if(!entry||!Object.hasOwn(entry,'value'))invalid();
       copy[key]=walk(entry.value,depth+1);
