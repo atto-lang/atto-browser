@@ -6,9 +6,25 @@
 import {encodeMessage,decodeMessage,normalizeOwnedContract} from "./owned-message/owned-envelope.mjs";
 
 const fail=reason=>{throw new TypeError("Oreslang owned actor Worker: "+reason)};
-export function createOwnedActorWorker({
- schema,workerFactory,maxPending=16,maxBytes=1048576,timeoutMs=5000
-}={}){
+export function createOwnedActorWorker(options={}){
+ // Worker creation is a privileged side effect. Snapshot only inert fields
+ // before validating or allocating the carrier.
+ if(options===null || typeof options!=="object" || Array.isArray(options))
+  fail("invalid Worker options");
+ const proto=Object.getPrototypeOf(options);
+ if(proto!==Object.prototype && proto!==null)fail("invalid Worker options");
+ const accepted=["schema","workerFactory","maxPending","maxBytes","timeoutMs"];
+ if(Reflect.ownKeys(options).some(key=>!accepted.includes(key)))
+  fail("unknown Worker option");
+ const own=(name,fallback)=>{
+  const d=Object.getOwnPropertyDescriptor(options,name);
+  if(d && (!d.enumerable || !Object.hasOwn(d,"value")))
+   fail("Worker options require own data fields");
+  return d?.value===undefined?fallback:d.value;
+ };
+ const schema=own("schema",undefined),workerFactory=own("workerFactory",undefined);
+ const maxPending=own("maxPending",16),maxBytes=own("maxBytes",1048576);
+ const timeoutMs=own("timeoutMs",5000);
  if(!Number.isSafeInteger(maxPending)||maxPending<1||maxPending>256)fail("invalid maxPending");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid timeout");
  if(!Number.isSafeInteger(maxBytes)||maxBytes<44||maxBytes>1048576)fail("invalid maxBytes");
