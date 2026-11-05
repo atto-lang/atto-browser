@@ -46,7 +46,7 @@ export function snapshotCoreManifest(original) {
       const copy=[];
       for(let i=0;i<length;i++){
         const entry=Object.getOwnPropertyDescriptor(value,String(i));
-        if(!entry||!Object.hasOwn(entry,'value'))invalid();
+        if(!entry||!Object.hasOwn(entry,'value')||!entry.enumerable)invalid();
         copy.push(walk(entry.value,depth+1));
       }
       return Object.freeze(copy);
@@ -65,7 +65,7 @@ export function snapshotCoreManifest(original) {
       textBytes+=encoder.encode(key).length;
       if(textBytes>4096)invalid();
       const entry=Object.getOwnPropertyDescriptor(value,key);
-      if(!entry||!Object.hasOwn(entry,'value'))invalid();
+      if(!entry||!Object.hasOwn(entry,'value')||!entry.enumerable)invalid();
       copy[key]=walk(entry.value,depth+1);
     }
     return Object.freeze(copy);
