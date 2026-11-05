@@ -164,8 +164,12 @@ export function createActorMessageTransport({
   // void from terminate(): that alone does not prove the old guest exited.
   // Only an exact, validated STOPPED receipt after teardown proves quiescence
   // for the synchronous actor protocol in a non-awaitable Worker adapter.
-  if(termination&&typeof termination.then==="function")
-   return Promise.resolve(termination).then(release);
+  // A custom Worker adapter may return a poisoned thenable. A throwing
+  // .then getter must reject completion, not escape synchronously from cleanup.
+  let thenable=false;
+  try{thenable=termination!==null&&termination!==undefined&&typeof termination.then==="function";}
+  catch(error){return Promise.reject(error);}
+  if(thenable)return Promise.resolve(termination).then(release);
   if(actorKey!==undefined&&!guestQuiesced)
    return Promise.reject(Error("nonawaitable Worker termination did not confirm actor retirement"));
   release();
