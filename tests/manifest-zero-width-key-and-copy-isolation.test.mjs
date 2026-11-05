@@ -28,9 +28,8 @@ test('ordinary multilingual manifest keys preserve spelling and deep frozen valu
   assert.equal(copy.café['名称'],'源文件');
 });
 
-test('manifest snapshot refuses non-enumerable or symbolic authority without getter evaluation',()=>{
-  const hidden={value:1};
-  Object.defineProperty(hidden,'secret',{value:'admin',enumerable:false});
+test('manifest snapshot refuses inherited or symbolic authority without getter evaluation',()=>{
+  const inherited=Object.assign(Object.create({secret:'admin'}),{value:1});
   let calls=0;
   const getter={value:1};
   Object.defineProperty(getter,'permit',{enumerable:true,get(){
@@ -38,7 +37,7 @@ test('manifest snapshot refuses non-enumerable or symbolic authority without get
   }});
   assert.throws(()=>snapshotCoreManifest(getter),/serialization/);
   assert.equal(calls,0);
-  assert.throws(()=>snapshotCoreManifest({nested:hidden}),/serialization|invalid browser/);
+  assert.throws(()=>snapshotCoreManifest({nested:inherited}),/serialization/);
   assert.throws(()=>snapshotCoreManifest({nested:{[Symbol('admin')]:true}}),
     /serialization/);
 });
