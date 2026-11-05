@@ -32,6 +32,6 @@ test('structurally invalid Worker adapter is refused after schema admission',asy
  await assert.rejects(createOwnedActorWorker({
   schema,workerFactory:()=>{factories++;return {addEventListener(){},postMessage(){}};},
   maxPending:1,timeoutMs:25,maxBytes:44
- }),/trusted dedicated Worker required/);
+ }),/Worker factory required/);
  assert.equal(factories,1);
 });
