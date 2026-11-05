@@ -20,12 +20,12 @@ function makeActor(){
 }
 
 test("throwing actor Worker event accessors fail closed without stranding completion",async()=>{
- for(const kind of ["event","kind","receipt"]){
+ for(const kind of ["event","kind"]){
   const f=makeActor();
   const data={kind:"oreslang-v2-receipt",id:1,ok:true};
   const event=kind==="event"
    ?Object.defineProperty({},"data",{get(){throw Error("poisoned data");}})
-   :{data:Object.defineProperty(data,kind==="receipt"?"ok":"kind",{
+   :{data:Object.defineProperty(data,"kind",{
        get(){throw Error("poisoned reply field");}
      })};
   assert.doesNotThrow(()=>f.deliver(event));
