@@ -237,7 +237,8 @@ export function createActorMessageTransport({
  }
  const onMessage=event=>{
   if(finished)return;
-  const m=event?.data;
+  try {
+   const m=event?.data;
   if(!m||typeof m!=="object")return fatal(Error("invalid actor worker message"));
   if(incarnation!==null&&m.incarnation!==incarnation)
    return fatal(Error("stale or forged actor incarnation response"));
@@ -256,6 +257,11 @@ export function createActorMessageTransport({
    complete(null,true,true);return
   }
   fatal(Error("invalid actor worker lifecycle or receipt"));
+  } catch {
+   // Even synthetic or malformed Worker accessors must terminate the
+   // carrier, not escape as an uncaught event and strand get_done().
+   fatal(Error("invalid actor worker message"));
+  }
  };
  try{
   worker.addEventListener("message",onMessage);
