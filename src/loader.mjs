@@ -46,7 +46,13 @@ export async function loadOreslangWasm(bytes,{
   if(inspected.memoryCount!==1||!inspected.hasMemoryMaximum)throw new Error("Oreslang ABI needs one bounded module memory");
  }
  const clockRequested=Array.prototype.includes.call(requested,"clock");
- const clockProvider=clockRequested ? host.clockMs : undefined;
+ // Providers are admission-time own data capabilities. Never execute a
+ // caller-controlled accessor (or trust an inherited provider) to discover one.
+ const clockSlot=clockRequested && host!=null &&
+   (typeof host==="object"||typeof host==="function")
+   ? Object.getOwnPropertyDescriptor(host,"clockMs") : undefined;
+ const clockProvider=clockSlot && Object.hasOwn(clockSlot,"value")
+   ? clockSlot.value : undefined;
  if(clockRequested && typeof clockProvider!=="function"){
   throw new Error("clock requested but no host.clockMs provider supplied");
  }
