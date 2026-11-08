@@ -33,3 +33,14 @@ Runtime admission principles:
 - The static target profiles registry is not a permission oracle; the embedding application owns the grants.
 
 Next: link the real compiler's Wasm output, browser Web Worker actor scheduler, async host adapters, DOM APIs under capabilities, and conformance runs. This prototype makes none of those claims.
+
+## Repository ownership and migration (2026-11-08)
+
+The language is publicly **AttoLang** (formerly Oreslang), while the repository remains `ores-truffle-oreslang/oreslang-browser`. Keep supported `.ores` source, historical import/package IDs and command names working unless a reviewed compatibility change proves replacements.
+
+- **Belongs here:** client/browser AttoLang integration, DOM adapters and web packaging experiments.
+- **Explicitly out of scope:** claiming complete secure browser engine isolation.
+- **Organization split:** [atto-lang](https://github.com/atto-lang) maintains the compiler, portable language libraries and demo ecosystem; [atto-co](https://github.com/atto-co) handles independently governed commercial cloud hosting, tenant identity, billing, deployment control, networking and infrastructure. Related `atto-*` repos are not assumed transferred copies.
+- **Proposed first move:** transfer this **same GitHub repository** to `atto-lang/oreslang-browser`, preserving numeric ID, name and Git history, after individual authorizations. No direct old-org transfer to `atto-co` is authorized now. Future product spinouts need a separate decision.
+
+**Migration and security checklist:** post ownership claim to [coordination issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26); follow private [runbook draft #25](https://github.com/ores-truffle-oreslang/.github/pull/25). Record ID, exact head SHA/tree, PR/release/package consumers, Apps/webhooks, Pages, secrets, Actions/runners, branch/ruleset enforcement, target visibility/access, source/target admin approval, independent security review and rollback owner. Never mirror private source to evade a blocked transfer. Verify unchanged identity/history/tree and re-enable protections after the authorized GitHub transfer, then update external references and run exact-head CI. Jobs with zero executed steps (`steps=[]`/`null`) are `NOT_EXECUTED`, not success. Host-only and static tests do not prove native AttoLang guest or production networking capabilities.
