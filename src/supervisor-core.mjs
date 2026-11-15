@@ -3,6 +3,7 @@ import { PROTOCOL, MAX_TENANTS, assert_entry_url, assert_request, error_text,
 import { MAX_ROUTES, MAX_ROUTE_INFLIGHT, assert_route_id, assert_route_capability,
   assert_route_buffer, assert_route_target } from './route-protocol.mjs';
 import {create_send_receipt,create_send_failure} from './send-receipt.mjs';
+import {ActorLeaseRegistry} from './lease-registry.mjs';
 
 // Run in a dedicated Web Worker. Service Workers can be terminated by browsers.
 export class TenantSupervisor {
@@ -19,6 +20,7 @@ export class TenantSupervisor {
     this.call_timeout_ms = call_timeout_ms;
     this.restart_limit = restart_limit;
     this.tenants = new Map();
+    this.leases = new ActorLeaseRegistry(); // private to this supervisor worker
     this.routes = new Map();
     this.next_route_id = 0;
     this.next_internal_id = 0;
@@ -70,8 +72,8 @@ export class TenantSupervisor {
   #spawn(msg) {
     if (this.tenants.has(msg.tenant)) throw new Error('E_TENANT_EXISTS');
     if (this.tenants.size >= MAX_TENANTS) throw new Error('E_TENANT_LIMIT');
-    if (!['wasm', 'js', 'receiver'].includes(msg.backend)) throw new Error('E_BACKEND');
-    if(msg.backend==='receiver') {
+    if (!['wasm', 'js', 'receiver', 'stateful-preview'].includes(msg.backend)) throw new Error('E_BACKEND');
+    if(msg.backend==='receiver'||msg.backend==='stateful-preview') {
       assert_receiver_identifier(msg.owner,'E_RECEIVER_ADMISSION');
       if(typeof msg.sha256!=='string' || !/^[0-9a-f]{64}$/.test(msg.sha256))
         throw new Error('E_RECEIVER_ADMISSION');
@@ -80,8 +82,8 @@ export class TenantSupervisor {
     if (msg.backend === 'js' && msg.trusted !== true) throw new Error('E_JS_REQUIRES_TRUST');
     const entry = assert_entry_url(msg.entry, this.origin);
     const state = {id:msg.tenant,backend:msg.backend,entry,trusted:msg.trusted === true,
-                   owner:msg.backend==='receiver'?msg.owner:null,
-                   sha256:msg.backend==='receiver'?msg.sha256:null,
+                   owner:['receiver','stateful-preview'].includes(msg.backend)?msg.owner:null,
+                   sha256:['receiver','stateful-preview'].includes(msg.backend)?msg.sha256:null,
                    generation:0,capability:null,worker_instance:null,restarts:0,worker:null,
                    pending:null,bindings:new Map(),boot_request:msg.id,ready:false,timer:null};
     this.tenants.set(state.id,state);
@@ -92,6 +94,7 @@ export class TenantSupervisor {
       this.#retire(state,'E_GENERATION_EXHAUSTED',true); return;
     }
     state.generation=++this.next_generation;
+    if(state.backend==='stateful-preview')this.leases.begin(state.id,state.generation);
     // The token is never sent into the tenant worker. It is replaced on each
     // restart, and old handles are permanently invalid.
     state.capability=crypto.randomUUID();
@@ -108,7 +111,7 @@ export class TenantSupervisor {
     worker.onmessageerror = () => this.#failure(state,generation,'E_WORKER_MESSAGE');
     state.timer = setTimeout(() => this.#failure(state,generation,'E_BOOT_TIMEOUT'),this.boot_timeout_ms);
     try { worker.postMessage({protocol:PROTOCOL,op:'boot',tenant:state.id,generation,backend:state.backend,entry:state.entry,trusted:state.trusted,
-        ...(state.backend==='receiver' ? {owner:state.owner,sha256:state.sha256}: {})}); }
+        ...(['receiver','stateful-preview'].includes(state.backend) ? {owner:state.owner,sha256:state.sha256}: {})}); }
     catch (e) { this.#failure(state,generation,'E_BOOT_POST: '+error_text(e)); }
   }
   #worker_message(state,generation,data) {
@@ -134,7 +137,7 @@ export class TenantSupervisor {
     }
     if (data.op==='control' && state.ready && state.pending && data.id===state.pending.id) {
       const notice=data.control;
-      if(!['wasm','js','receiver'].includes(state.backend) || data.tenant!==state.id ||
+      if(!['wasm','js','receiver','stateful-preview'].includes(state.backend) || data.tenant!==state.id ||
           notice?.kind!=='panic' || !Number.isSafeInteger(notice.actor_id) ||
           notice.actor_id<1 || notice.actor_id>64 ||
           !Number.isSafeInteger(notice.parent_id) ||
@@ -142,7 +145,7 @@ export class TenantSupervisor {
           typeof notice.actor_type!=='string' || notice.actor_type.length<1 ||
           notice.actor_type.length>256 || typeof notice.reason!=='string' ||
           notice.reason.length>256 || !notice.reason.startsWith('E_GUEST_') ||
-          (state.backend==='receiver' && (
+          (['receiver','stateful-preview'].includes(state.backend) && (
             state.pending.kind!=='receiver' ||
             notice.actor_id!==1 || notice.parent_id!==0 ||
             notice.actor_type!==state.owner ||
@@ -245,6 +248,10 @@ export class TenantSupervisor {
         try {result=normalize_receiver_result(data.result)}catch{
           this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
         }
+        if(state.backend==='stateful-preview' &&
+           !this.leases.release(state.pending.lease)){
+          this.#failure(state,generation,'E_STATE_HOST_LEASE');return;
+        }
         clearTimeout(state.timer);state.timer=null;state.pending=null;
         this.#reply(data.id,true,{tenant:state.id,generation,...result});
       }else if(data.error==='E_RECEIVER_METHOD' ||
@@ -253,6 +260,10 @@ export class TenantSupervisor {
           this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
         }
         // The guest wasn't executed: recoverable pre-dispatch rejection.
+        if(state.backend==='stateful-preview' &&
+           !this.leases.release(state.pending.lease)){
+          this.#failure(state,generation,'E_STATE_HOST_LEASE');return;
+        }
         clearTimeout(state.timer);state.timer=null;state.pending=null;
         this.#reply(data.id,false,undefined,data.error);
       }else{
@@ -312,7 +323,8 @@ export class TenantSupervisor {
     if (!state) throw new Error('E_NO_TENANT');
     this.#authorize(msg,state);
     if (!state.ready) throw new Error('E_TENANT_NOT_READY');
-    if (state.backend==='receiver')throw new Error('E_RECEIVER_OP');
+    if (state.backend==='receiver'||state.backend==='stateful-preview')
+      throw new Error('E_RECEIVER_OP');
     if (state.pending) throw new Error('E_TENANT_BUSY');
     state.pending = { id:msg.id,kind:'call' };
     state.control_sent=false;
@@ -324,7 +336,8 @@ export class TenantSupervisor {
     const state=this.tenants.get(msg.tenant);
     if(!state)throw new Error('E_NO_TENANT');
     this.#authorize(msg,state); // generation and supervisor-held capability
-    if(state.backend!=='receiver')throw new Error('E_RECEIVER_BACKEND');
+    if(state.backend!=='receiver'&&state.backend!=='stateful-preview')
+      throw new Error('E_RECEIVER_BACKEND');
     if(!state.ready)throw new Error('E_TENANT_NOT_READY');
     if(state.pending)throw new Error('E_TENANT_BUSY');
     assert_receiver_identifier(msg.method,'E_RECEIVER_METHOD');
@@ -332,7 +345,13 @@ export class TenantSupervisor {
         msg.args.some(x=>typeof x!=='bigint' ||
           x<-(1n<<63n) || x>(1n<<63n)-1n))
       throw new Error('E_RECEIVER_ARGS');
-    state.pending={kind:'receiver',id:msg.id};
+    if(state.backend==='stateful-preview' && msg.args.length!==1)
+      throw new Error('E_RECEIVER_ARGS');
+    // Host owns the write lease: no guest instruction is trusted to release
+    // it. A hard Worker kill revokes the generation independently.
+    const lease=state.backend==='stateful-preview'?
+      this.leases.acquire(state.id,state.generation,'write'):null;
+    state.pending={kind:'receiver',id:msg.id,lease};
     state.control_sent=false;
     state.timer=setTimeout(()=>this.#failure(state,state.generation,'E_CALL_TIMEOUT'),
       this.call_timeout_ms);
@@ -496,6 +515,7 @@ export class TenantSupervisor {
   #failure(state,generation,reason,request_id=null,detail=null) {
     if (this.tenants.get(state.id)!==state || state.generation!==generation) return;
     clearTimeout(state.timer);state.timer=null;
+    if(state.backend==='stateful-preview')this.leases.revoke(state.id,generation);
     const pending=state.pending;
     state.pending=null;
     if(pending?.kind==='route' || pending?.kind==='remote')this.active_route_sends--;
@@ -536,6 +556,8 @@ export class TenantSupervisor {
   #retire(state,reason,failed) {
     clearTimeout(state.timer);state.timer=null;
     state.worker?.terminate();state.worker=null;
+    if(state.backend==='stateful-preview')
+      this.leases.retire(state.id,state.generation);
     this.tenants.delete(state.id);
     this.#drop_routes(state);
     if(state.pending){
