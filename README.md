@@ -29,3 +29,11 @@ The supervisor issues `{tenant,generation,capability}` when a tenant becomes rea
 ### Bounded Wasm policy
 
 The v1 Wasm loader requires fixed non-growing linear memory (at most 16 Wasm pages = 1 MiB per instance), no Wasm tables, an allowed `atto` function import set, and a consistent compiler-produced `atto.actors` custom section. A tenant can instantiate up to 64 actor instances. CPU watchdog protection applies at the worker level, not individual actor execution; worker termination reclaims all tenant actors.
+
+### Real browser supervisor + compiled actor end-to-end
+
+The checked-in test driver starts actual Chromium module Web Workers: a dedicated supervisor and multiple tenant workers. Two different Rust-compiled Wasm actor fixtures run independently, followed by an actor overflow panic. The browser checks that a CONTROL notice precedes `tenant_down`, that restart rotates capabilities and rejects stale handles, that surviving tenants remain healthy, and that shutdown reclaims all workers. The worker ID is a diagnostic nonce, not an authorization token.
+
+Compile the fixture sources with a separately obtained trusted Rust `attoc` compiler (the current `atto-source.rs` implementation), producing `two-actors.wasm` from `tests/fixtures/pass/67-actor-two-instances.atto`, `actor-state.wasm` from `tests/fixtures/pass/61-actor-state.atto`, and `actor-overflow.wasm` from `tests/fixtures/panic/10-actor-overflow.atto`. Set `ATTO_BROWSER_FIXTURE_DIR` to the absolute directory containing those binaries and run `CHROME_BIN=/path/to/chromium npm run test:browser-tenants` under Node 22+. The script never sends source code to the server. The alternate private Actions mirror builds both exact source trees and runs the complete command.
+
+The actor CONTROL message is logically separate from ordinary actor mailbox traffic, but uses the same browser worker `postMessage` scheduling mechanism; it is **not** a separate high-priority browser scheduling primitive. The current failure policy restarts the entire tenant, rather than just the failed actor. Service Workers still are not persistent supervisors.
