@@ -64,3 +64,39 @@ test('actor failures carry metadata from trusted host, not guest Wasm',async()=>
     });
   }finally{globalThis.fetch=old;}
 });
+
+test('a streaming response cannot produce unbounded empty chunks',async()=>{
+  const old=globalThis.fetch;
+  let reads=0,cancelled=0;
+  globalThis.fetch=async()=>({ok:true,body:{getReader:()=>({
+    read:async()=>{reads++;return {done:false,value:new Uint8Array(0)}},
+    cancel:async()=>{cancelled++}
+  })}});
+  try {
+    await assert.rejects(open_wasm_tenant('https://example.test/stalling.wasm'),/E_WASM_STREAM_CHUNKS/);
+    assert.equal(reads,8193);
+    assert.equal(cancelled,1);
+  }finally{globalThis.fetch=old;}
+});
+test('many tiny print calls cannot allocate unbounded stdout chunk slots',async()=>{
+  const uleb=n=>{const out=[];do{let b=n&127;n=Math.floor(n/128);if(n)b|=128;out.push(b)}while(n);return out};
+  const str=s=>{const bytes=new TextEncoder().encode(s);return [...uleb(bytes.length),...bytes]};
+  const section=(id,bytes)=>[id,...uleb(bytes.length),...bytes];
+  const prints=Array.from({length:8193},()=>[0x10,0x00]).flat();
+  const body=[0,...prints,0x42,0x2a,0x0b];
+  const wasm=new Uint8Array([
+    0,97,115,109,1,0,0,0,
+    ...section(1,[2,0x60,0,0,0x60,0,1,0x7e]),
+    ...section(2,[1,...str('atto'),...str('print_newline'),0,0]),
+    ...section(3,[1,1]),
+    ...section(7,[1,...str('main'),0,1]),
+    ...section(10,[1,...uleb(body.length),...body])
+  ]);
+  assert.equal(WebAssembly.validate(wasm),true);
+  const old=globalThis.fetch;
+  globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>wasm.buffer});
+  try {
+    const guest=await open_wasm_tenant('https://example.test/tiny-prints.wasm');
+    await assert.rejects(guest.on_message(),/E_STDOUT_CHUNKS/);
+  }finally{globalThis.fetch=old;}
+});
