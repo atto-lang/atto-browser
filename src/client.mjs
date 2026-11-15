@@ -71,8 +71,9 @@ export class BrowserTenantClient {
     });
   }
   // JS modules are trusted same-origin code, never a security sandbox.
-  spawn(tenant, { backend = 'wasm', entry, trusted = false } = {}) {
-    return this.#request('spawn', { tenant: assert_tenant_id(tenant), backend, entry, trusted });
+  spawn(tenant, { backend = 'wasm', entry, trusted = false, owner, sha256 } = {}) {
+    return this.#request('spawn', { tenant: assert_tenant_id(tenant), backend, entry, trusted,
+      ...(backend==='receiver' ? {owner,sha256} : {}) });
   }
   // A tenant name alone is not authority. Reuse only a current spawn/ready handle.
   #handle(handle) {
@@ -85,6 +86,17 @@ export class BrowserTenantClient {
     return {tenant,generation,capability};
   }
   call(handle) { return this.#request('call', this.#handle(handle)); }
+  // The tenant handle is the supervisor-authorized generation/capability.
+  // Wasm binding secrets never leave the tenant worker. Avoid coercing BigInt.
+  call_receiver(handle,method,...args) {
+    try {
+      if(typeof method!=='string' || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(method))
+        throw new Error('E_RECEIVER_METHOD');
+      if(args.length>8 || args.some(x=>typeof x!=='bigint' ||
+          x<-(1n<<63n) || x>(1n<<63n)-1n))throw new Error('E_RECEIVER_ARGS');
+      return this.#request('call_receiver',{...this.#handle(handle),method,args});
+    }catch(error){return Promise.reject(error)}
+  }
   stop(handle) { return this.#request('stop', this.#handle(handle)); }
   list() { return this.#request('list'); }
   // The application must possess BOTH tenant handles before granting a route.
