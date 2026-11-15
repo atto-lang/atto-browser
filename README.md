@@ -159,3 +159,43 @@ protocol violation, never a proven panic notification.
 These rules apply only to the immutable, scalar, one-actor-per-worker preview.
 They do not authorize mutable actor state, production mailbox scheduling, or
 lease cleanup.
+
+## Experimental source-compiled stateful actor and supervisor leases
+
+The `backend:'stateful-preview'` path loads a **build-pinned** Wasm artifact
+from AttoLang Rust `--stateful-method-preview` compiler. The complete source
+subset is documented in [atto-source.rs stateful-method-preview](https://github.com/atto-lang/atto-source.rs/blob/feat/stateful-callback-generation-20261115/docs/stateful-method-preview.md).
+It executes the actual `s.count = s.count + delta` callback, initialized from
+its source actor definition, inside one dedicated Web Worker per actor.
+
+```js
+const counter=await client.spawn('counter_A',{
+  backend:'stateful-preview', owner:'Counter',
+  entry:'/artifacts/counter.wasm',sha256:BUILD_MANIFEST_SHA256,
+});
+const reply=await client.call_receiver(counter,'increment',25n);
+// reply.value is the updated i64 diagnostic (e.g. "42"), despite source void.
+```
+
+The browser supervisor owns a **separate lease registry**. It admits one
+generation-fenced exclusive write lease per pending stateful request, releases
+the host lease only on a verified successful/pre-dispatch reply, and revokes
+any outstanding lease **before** worker termination, timeout restart or stop.
+There is no host lease token inside guest Wasm or any worker message. Stale
+generation tickets cannot release a new incarnation's lease. Internally the
+guest still emits and verifies real release instructions on normal, checked
+overflow and cooperative cancellation, but its local lease flag is not
+trusted as host ownership.
+
+Source actor state is **worker-local and not durable**. A panic, hard timeout
+or restart drops that worker's state and the replacement starts from the
+original source initializer. No persistence/replay or distributed lock
+ownership is implied. This milestone does not enable general stateful
+`mtd`, arbitrary callbacks, `critical-read` codegen, multi-field state,
+suspension, actor mailboxes, general concurrency or production compilation.
+The ordinary `receiver`, `wasm`, and `js` backends remain separate.
+
+Run actual Chromium:
+`ATTO_BROWSER_FIXTURE_DIR=/path/to/compiled/guests npm run test:browser-stateful`.
+The fixture `stateful-counter.wasm` must be built by the exact pinned Rust
+source compiler, not downloaded from another organization with a token.
