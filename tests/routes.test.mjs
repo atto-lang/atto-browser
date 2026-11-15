@@ -197,3 +197,84 @@ test('compiled route slots cannot be rebound or forged with stale route authorit
     route_capability:route.route_capability,slot:1});
   assert.equal(h.answer(id).error,'E_ROUTE_SLOT_IN_USE');
 });
+
+test('direct routed send returns authoritative processed receipt and rejects duplicate reply',()=>{
+  const h=fixture(),a=h.spawn('a'),b=h.spawn('b'),route=grant(h,a,b);
+  const id=h.send('send_route',{...a,route_id:route.route_id,
+    route_capability:route.route_capability,wire_type:'i64',buffer:new ArrayBuffer(8)});
+  const mail=h.workers[1].messages.at(-1);
+  h.workers[1].emit({op:'route_result',id,tenant:'b',generation:b.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'1\n',actors:1}});
+  const ack=h.answer(id).result;
+  assert.equal(ack.receipt.protocol,'atto.browser.send-receipt.v1');
+  assert.equal(ack.receipt.outcome,'processed');
+  assert.equal(ack.receipt.code,'OK');
+  assert.equal(ack.receipt.source,'a');
+  assert.equal(ack.receipt.target,'b');
+  assert.equal(ack.receipt.actor_id,1);
+  assert.equal(ack.receipt.capability,undefined);
+  assert.equal(h.supervisor.active_route_sends,0);
+  h.workers[1].emit({op:'route_result',id,tenant:'b',generation:b.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'DUPLICATE'}});
+  assert.equal(h.replies.filter(x=>x.id===id).length,1);
+  assert.equal(h.supervisor.active_route_sends,0);
+});
+test('compiled remote batch returns receipt for each processed message',()=>{
+  const h=fixture(),a=h.spawn('a'),b=h.spawn('b'),route=grant(h,a,b);
+  h.send('bind_route',{...a,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  const id=h.send('call',a);
+  h.workers[0].emit({op:'result',tenant:'a',generation:a.generation,id,
+    ok:true,result:{value:'0'},remote_sends:[{slot:1,value:40n},{slot:1,value:2n}]});
+  const first=h.workers[1].messages.at(-1);
+  h.workers[1].emit({op:'route_result',id:first.id,tenant:'b',generation:b.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'40\n'}});
+  const second=h.workers[1].messages.at(-1);
+  h.workers[1].emit({op:'route_result',id:second.id,tenant:'b',generation:b.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'42\n'}});
+  const final=h.answer(id).result;
+  assert.deepEqual(final.remote_receipts.map(r=>r.outcome),['processed','processed']);
+  assert.equal(final.remote_receipts[0].receipt_id+1,final.remote_receipts[1].receipt_id);
+  assert.deepEqual(final.remote_acks.map(x=>x.receipt),final.remote_receipts);
+});
+test('receiver crash after first ack yields unknown receipt and preserved confirmed history',()=>{
+  const h=fixture(),a=h.spawn('a'),b=h.spawn('b'),route=grant(h,a,b);
+  h.send('bind_route',{...a,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  const id=h.send('call',a);
+  h.workers[0].emit({op:'result',tenant:'a',generation:a.generation,id,
+    ok:true,result:{value:'0'},remote_sends:[{slot:1,value:40n},{slot:1,value:2n}]});
+  const first=h.workers[1].messages.at(-1);
+  h.workers[1].emit({op:'route_result',id:first.id,tenant:'b',generation:b.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'40\n'}});
+  h.workers[1].onerror();
+  const failure=h.answer(id);
+  assert.equal(failure.ok,false);
+  assert.equal(failure.failure.protocol,'atto.browser.send-receipt.v1');
+  assert.equal(failure.failure.outcome,'unknown');
+  assert.equal(failure.failure.code,'E_ROUTE_CRASH');
+  assert.equal(failure.failure.receipt.outcome,'unknown');
+  assert.equal(failure.failure.prior_receipts.length,1);
+  assert.equal(failure.failure.prior_receipts[0].outcome,'processed');
+  assert.equal(h.workers[2].terminated,true,'source worker restarted rather than treating unknown as success');
+});
+test('rejected next send after revocation is not mislabeled processed',()=>{
+  const h=fixture(),a=h.spawn('a'),b=h.spawn('b'),route=grant(h,a,b);
+  h.send('bind_route',{...a,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  const id=h.send('call',a);
+  h.workers[0].emit({op:'result',tenant:'a',generation:a.generation,id,
+    ok:true,result:{value:'0'},remote_sends:[{slot:1,value:40n},{slot:1,value:2n}]});
+  const first=h.workers[1].messages.at(-1);
+  h.send('revoke_route',{...a,route_id:route.route_id,
+    route_capability:route.route_capability});
+  h.workers[1].emit({op:'route_result',id:first.id,tenant:'b',generation:b.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'40\n'}});
+  const result=h.answer(id);
+  assert.equal(result.error,'E_REMOTE_ROUTE_STALE');
+  assert.equal(result.failure.outcome,'rejected');
+  assert.equal(result.failure.code,'E_ROUTE_STALE');
+  assert.equal(result.failure.receipt,null);
+  assert.equal(result.failure.prior_receipts.length,1);
+  assert.equal(result.failure.prior_receipts[0].outcome,'processed');
+});
