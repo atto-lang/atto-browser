@@ -73,6 +73,17 @@ export class BrowserTenantClient {
     return this.#request('grant_route',{...this.#handle(source),
       target:this.#handle(target),actor_id,wire_type});
   }
+  // Bind an opaque integer slot for compiled AttoLang remote_actor(Type,slot).
+  // Only the supervisor sees the route capability; guest Wasm sees -slot.
+  bind_route(source,route,slot=1) {
+    if(!Number.isSafeInteger(slot) || slot<1 || slot>16)
+      return Promise.reject(new Error('E_ROUTE_SLOT'));
+    try {
+      return this.#request('bind_route',{...this.#handle(source),
+        route_id:assert_route_id(route.route_id),
+        route_capability:assert_route_capability(route.route_capability),slot});
+    }catch(error){return Promise.reject(error)}
+  }
   // rt take: the ArrayBuffer detaches as soon as postMessage succeeds, even
   // if the destination rejects the send. rt copy: caller keeps its original.
   // SharedArrayBuffer, views and detached/oversized payloads are rejected.
