@@ -32,3 +32,19 @@ test('actor panic is read from the failing actor, not main Wasm instance',async(
     await assert.rejects(guest.on_message(),/E_GUEST_PANIC_7/);
   }finally{globalThis.fetch=old_fetch;}
 });
+
+test('require redirect-error before Wasm guest download and reject redirected responses',async()=>{
+  const before=globalThis.fetch;
+  const observed=[];
+  globalThis.fetch=async(url,options)=>{
+    observed.push({url,options});
+    return {ok:true,redirected:true,url:'https://outside.example/redirect.wasm',
+      arrayBuffer:async()=>{throw new Error('E_SHOULD_NOT_READ_REDIRECT');}};
+  };
+  try {
+    await assert.rejects(open_wasm_tenant('https://app.example/guest.wasm'),/E_WASM_REDIRECT/);
+    assert.equal(observed.length,1);
+    assert.equal(observed[0].url,'https://app.example/guest.wasm');
+    assert.deepEqual(observed[0].options,{credentials:'omit',mode:'same-origin',redirect:'error'});
+  }finally{globalThis.fetch=before;}
+});
