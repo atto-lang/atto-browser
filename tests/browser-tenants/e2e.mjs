@@ -74,6 +74,47 @@ const off=client.on_event(event=>{report.events.push(event)});
       'E_ROUTE_INVALID');
 
 
+    // Source-level AttoLang remote_actor(Counter,1).send(...) is compiled
+    // into Wasm; neither message is initiated by JavaScript send_route().
+    const compiledReceiver=await client.spawn('compiled_receiver',{backend:'wasm',
+      entry:'/fixtures/remote-receiver.wasm'});
+    const receiverReady=await client.call(compiledReceiver);
+    check(receiverReady.actors===1 && receiverReady.value==='0',
+      'compiled receiver actor is ready in an isolated tenant');
+    const compiledSender=await client.spawn('compiled_sender',{backend:'wasm',
+      entry:'/fixtures/remote-sender.wasm'});
+    const compiledRoute=await client.grant_route(compiledSender,compiledReceiver,
+      {actor_id:1,wire_type:'i64'});
+    const binding=await client.bind_route(compiledSender,compiledRoute,1);
+    check(binding.bound===true && binding.slot===1,
+      'supervisor authorizes typed source-level route slot without exposing capability to Wasm');
+    const compiledResult=await client.call(compiledSender);
+    check(compiledResult.value==='0' && compiledResult.actors===1,
+      'compiled Sender actor executed remote ActorRef.send twice');
+    check(compiledResult.remote_acks?.length===2 &&
+      JSON.stringify(compiledResult.remote_acks.map(x=>x.stdout))===
+        JSON.stringify(['40\n','42\n']),
+      'compiled remote sends deliver 40 then 2 and wait for ordered receiver acknowledgments');
+
+    // A revoked slot cannot dispatch compiler-originated mail even when the
+    // guest still holds its opaque (negative) actor reference.
+    const revokedSender=await client.spawn('compiled_revoked',{backend:'wasm',
+      entry:'/fixtures/remote-sender.wasm'});
+    const revokedRoute=await client.grant_route(revokedSender,compiledReceiver,
+      {actor_id:1,wire_type:'i64'});
+    await client.bind_route(revokedSender,revokedRoute,1);
+    await client.revoke_route(revokedSender,revokedRoute);
+    await rejects(client.call(revokedSender),'E_REMOTE_ROUTE_STALE');
+    const replacementRevoked=await wait_for(()=>report.events.find(e=>
+      e.event==='tenant_ready' && e.tenant==='compiled_revoked' &&
+      e.generation>revokedSender.generation),'revoked compiled sender restart');
+    await client.stop({tenant:replacementRevoked.tenant,generation:replacementRevoked.generation,
+      capability:replacementRevoked.capability});
+    await client.stop(compiledSender);
+    await client.stop(compiledReceiver);
+    check((await client.list()).filter(x=>x.ready).length===2,
+      'compiled cross-tenant sender and receiver shut down without leaked workers');
+
     const hung=await client.spawn('tenant_hung',{backend:'wasm',entry:'/fixtures/hung.wasm'});
     const hung_call=client.call(hung);
     // Exercise a healthy tenant while an unrelated guest blocks its worker.
@@ -124,7 +165,7 @@ const off=client.on_event(event=>{report.events.push(event)});
     await client.stop(beta);
     check((await client.list()).length===0,'all tenant workers terminated and removed');
     await rejects(client.call(alpha),'E_NO_TENANT');
-    check(report.events.filter(x=>x.event==='tenant_stopped').length===6,
+    check(report.events.filter(x=>x.event==='tenant_stopped').length===9,
       'supervisor confirms each tenant shutdown');
     report.status='ok';
   }catch(error){
