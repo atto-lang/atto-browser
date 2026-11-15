@@ -57,6 +57,9 @@ export async function open_wasm_tenant(entry) {
   const MAX_TOTAL_MAIL=8192;
   const text_decoder=new TextDecoder('utf-8',{fatal:true});
   let executions=0;
+  // Tracks the instance whose current guest entrypoint failed. A panic in an
+  // actor must not be misreported using the main instance's panic_code.
+  let active_guest=null;
 
   function instantiate() {
     let instance;
@@ -87,7 +90,10 @@ export async function open_wasm_tenant(entry) {
         actors.set(id,actor);
         try {
           actor.instance=instantiate();
+          active_guest=actor.instance;
           actor.instance.exports.actor_init(type);
+          // A normal init returns to the caller. A trap leaves active_guest
+          // pointing at the failing actor for the outer guest error handler.
           return id;
         } catch (e) { actors.delete(id); throw e; }
       },
@@ -110,6 +116,7 @@ export async function open_wasm_tenant(entry) {
       stdout_chunks=[]; stdout_bytes=0;
       let value;
       try {
+        active_guest=main;
         value=main.exports.main();
         if (typeof value!=='bigint') throw new Error('E_GUEST_SIGNATURE');
         let cursor=0, steps=0;
@@ -118,6 +125,7 @@ export async function open_wasm_tenant(entry) {
           const id=queued[cursor++],actor=actors.get(id);
           if(!actor || !actor.instance)throw new Error('E_ACTOR_REF');
           const payload=actor.mailbox.shift();
+          active_guest=actor.instance;
           actor.instance.exports.actor_receive(actor.type,payload,++actor.sequence);
           // Release processed admission slots before more messages arrive.
           // Keep a separate total-step limit to stop self-mailbox loops.
@@ -125,7 +133,7 @@ export async function open_wasm_tenant(entry) {
         }
         queued.length=0;
       }catch(e){
-        const code=main.exports.panic_code?.value;
+        const code=active_guest?.exports.panic_code?.value;
         throw new Error(code ? `E_GUEST_PANIC_${code}` : 'E_GUEST_TRAP: '+String(e?.message||e));
       }
       return {value:String(value),stdout:stdout_chunks.join(''),actors:actors.size};
