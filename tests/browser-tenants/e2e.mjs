@@ -38,6 +38,42 @@ const off=client.on_event(event=>{report.events.push(event)});
     check(result_b.value==='0' && result_b.actors===1,'separate Rust-compiled tenant guest executed');
     check(result_b.stdout.trim()==='main done\n40\n42','actor mailbox FIFO and main-to-actor ordering');
 
+    // An authenticated application-level route from Tenant A to the live
+    // Rust-compiled Counter actor in Tenant B. The actor state persists.
+    const route=await client.grant_route(alpha,beta,{actor_id:1,wire_type:'i64'});
+    const take_buffer=new ArrayBuffer(8);
+    new DataView(take_buffer).setBigInt64(0,3n,true);
+    const moved=await client.send_route(alpha,route,take_buffer,{mode:'take'});
+    check(take_buffer.byteLength===0,'rt take detaches sender ArrayBuffer');
+    check(moved.value==='delivered' && moved.stdout==='45\n',
+      'cross-worker typed i64 message reaches Rust-compiled actor state');
+    const copy_buffer=new ArrayBuffer(8);
+    new DataView(copy_buffer).setBigInt64(0,2n,true);
+    const copied=await client.send_route(alpha,route,copy_buffer,{mode:'copy'});
+    check(copy_buffer.byteLength===8 && copied.stdout==='47\n',
+      'rt copy retains sender bytes and preserves FIFO actor state');
+    const fake_route={...route,route_capability:'00000000-0000-4000-8000-000000000000'};
+    await rejects(client.send_route(alpha,fake_route,new ArrayBuffer(8),{mode:'copy'}),'E_ROUTE_INVALID');
+    const revoked=await client.revoke_route(alpha,route);
+    check(revoked.revoked===true,'application explicitly revokes route capability');
+    await rejects(client.send_route(alpha,route,new ArrayBuffer(8),{mode:'copy'}),'E_ROUTE_INVALID');
+
+    // A different trusted tenant receives a full 64 KiB transferred buffer.
+    const bytes_tenant=await client.spawn('tenant_bytes',{backend:'js',
+      entry:'/tests/browser-tenants/byte-receiver.mjs',trusted:true});
+    const bytes_route=await client.grant_route(alpha,bytes_tenant,{actor_id:0,wire_type:'bytes'});
+    const large=new ArrayBuffer(65536);new Uint8Array(large).fill(1);
+    const bytes_ack=await client.send_route(alpha,bytes_route,large,{mode:'take'});
+    check(large.byteLength===0 && bytes_ack.value==='bytes:65536' &&
+      bytes_ack.stdout==='checksum=65536\n',
+      '64KiB zero-copy transfer delivered to a separate trusted worker');
+    await rejects(client.send_route(alpha,bytes_route,new ArrayBuffer(65537),{mode:'take'}),
+      'E_ROUTE_SIZE');
+    await client.stop(bytes_tenant);
+    await rejects(client.send_route(alpha,bytes_route,new ArrayBuffer(8),{mode:'copy'}),
+      'E_ROUTE_INVALID');
+
+
     const hung=await client.spawn('tenant_hung',{backend:'wasm',entry:'/fixtures/hung.wasm'});
     const hung_call=client.call(hung);
     // Exercise a healthy tenant while an unrelated guest blocks its worker.
@@ -88,7 +124,7 @@ const off=client.on_event(event=>{report.events.push(event)});
     await client.stop(beta);
     check((await client.list()).length===0,'all tenant workers terminated and removed');
     await rejects(client.call(alpha),'E_NO_TENANT');
-    check(report.events.filter(x=>x.event==='tenant_stopped').length===5,
+    check(report.events.filter(x=>x.event==='tenant_stopped').length===6,
       'supervisor confirms each tenant shutdown');
     report.status='ok';
   }catch(error){
