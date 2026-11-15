@@ -112,13 +112,16 @@ export async function open_wasm_tenant(entry) {
       try {
         value=main.exports.main();
         if (typeof value!=='bigint') throw new Error('E_GUEST_SIGNATURE');
-        let cursor=0;
+        let cursor=0, steps=0;
         while(cursor<queued.length) {
-          if(cursor>=MAX_TOTAL_MAIL) throw new Error('E_DISPATCH_BUDGET');
+          if(++steps>65536) throw new Error('E_DISPATCH_BUDGET');
           const id=queued[cursor++],actor=actors.get(id);
           if(!actor || !actor.instance)throw new Error('E_ACTOR_REF');
           const payload=actor.mailbox.shift();
           actor.instance.exports.actor_receive(actor.type,payload,++actor.sequence);
+          // Release processed admission slots before more messages arrive.
+          // Keep a separate total-step limit to stop self-mailbox loops.
+          if(cursor>=1024) { queued.splice(0,cursor);cursor=0; }
         }
         queued.length=0;
       }catch(e){
