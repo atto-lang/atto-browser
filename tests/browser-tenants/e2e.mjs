@@ -50,6 +50,9 @@ const off=client.on_event(event=>{report.events.push(event)});
     const copy_buffer=new ArrayBuffer(8);
     new DataView(copy_buffer).setBigInt64(0,2n,true);
     const copied=await client.send_route(alpha,route,copy_buffer,{mode:'copy'});
+    check(copied.receipt?.protocol==='atto.browser.send-receipt.v1' &&
+      copied.receipt.outcome==='processed' && copied.receipt.code==='OK',
+      'direct transferred message returns validated processed receipt');
     check(copy_buffer.byteLength===8 && copied.stdout==='47\n',
       'rt copy retains sender bytes and preserves FIFO actor state');
     const fake_route={...route,route_capability:'00000000-0000-4000-8000-000000000000'};
@@ -64,6 +67,9 @@ const off=client.on_event(event=>{report.events.push(event)});
     const bytes_route=await client.grant_route(alpha,bytes_tenant,{actor_id:0,wire_type:'bytes'});
     const large=new ArrayBuffer(65536);new Uint8Array(large).fill(1);
     const bytes_ack=await client.send_route(alpha,bytes_route,large,{mode:'take'});
+    check(bytes_ack.receipt?.outcome==='processed' &&
+      bytes_ack.receipt.actor_id===0 && bytes_ack.receipt.route_id===bytes_route.route_id,
+      'trusted transferable receiver acknowledges on versioned receipt');
     check(large.byteLength===0 && bytes_ack.value==='bytes:65536' &&
       bytes_ack.stdout==='checksum=65536\n',
       '64KiB zero-copy transfer delivered to a separate trusted worker');
@@ -91,6 +97,12 @@ const off=client.on_event(event=>{report.events.push(event)});
     const compiledResult=await client.call(compiledSender);
     check(compiledResult.value==='0' && compiledResult.actors===1,
       'compiled Sender actor executed remote ActorRef.send twice');
+    check(compiledResult.remote_receipts?.length===2 &&
+      compiledResult.remote_receipts.every(r=>r.outcome==='processed' &&
+        r.code==='OK' && r.protocol==='atto.browser.send-receipt.v1') &&
+      compiledResult.remote_receipts[0].receipt_id <
+        compiledResult.remote_receipts[1].receipt_id,
+      'compiled sender returns separate ordered typed processed receipts');
     check(compiledResult.remote_acks?.length===2 &&
       JSON.stringify(compiledResult.remote_acks.map(x=>x.stdout))===
         JSON.stringify(['40\n','42\n']),
@@ -104,7 +116,14 @@ const off=client.on_event(event=>{report.events.push(event)});
       {actor_id:1,wire_type:'i64'});
     await client.bind_route(revokedSender,revokedRoute,1);
     await client.revoke_route(revokedSender,revokedRoute);
-    await rejects(client.call(revokedSender),'E_REMOTE_ROUTE_STALE');
+    let revokedError;
+    try {await client.call(revokedSender)}
+    catch(e){revokedError=e}
+    check(revokedError?.message==='E_REMOTE_ROUTE_STALE' &&
+      revokedError.failure?.outcome==='rejected' &&
+      revokedError.failure?.code==='E_ROUTE_STALE' &&
+      revokedError.failure?.receipt===null,
+      'revoked pre-dispatch send reports typed rejected outcome, never processed');
     const replacementRevoked=await wait_for(()=>report.events.find(e=>
       e.event==='tenant_ready' && e.tenant==='compiled_revoked' &&
       e.generation>revokedSender.generation),'revoked compiled sender restart');
