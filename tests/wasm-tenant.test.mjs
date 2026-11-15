@@ -48,3 +48,19 @@ test('require redirect-error before Wasm guest download and reject redirected re
     assert.deepEqual(observed[0].options,{credentials:'omit',mode:'same-origin',redirect:'error'});
   }finally{globalThis.fetch=before;}
 });
+
+test('actor failures carry metadata from trusted host, not guest Wasm',async()=>{
+  const bytes=Uint8Array.from(Buffer.from('0061736d0100000001190560017f017f60027f7e006000017e60017f0060037f7e7e00022602046174746f0b6163746f725f737061776e0000046174746f0a6163746f725f73656e6400010304030203040504010101010606017f0141000b073b05046d61696e00020a6163746f725f696e697400030d6163746f725f726563656976650004066d656d6f727902000a70616e69635f636f646f646503000a19030c00410010004205100142000b02000b070041072400000b00150b6174746f2e6163746f72730107436f756e746572'.replace('636f646f6465','636f6465'),'hex'));
+  assert.equal(WebAssembly.validate(bytes),true);
+  const old=globalThis.fetch;
+  globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>bytes.buffer.slice(0)});
+  try {
+    const tenant=await open_wasm_tenant('https://example.test/actor-panic.wasm');
+    await assert.rejects(tenant.on_message(),e=>{
+      assert.equal(e.message,'E_GUEST_PANIC_7');
+      assert.deepEqual(e.actor_failure,{kind:'panic',actor_id:1,parent_id:0,
+        actor_type:'Counter',reason:'E_GUEST_PANIC_7'});
+      return true;
+    });
+  }finally{globalThis.fetch=old;}
+});
