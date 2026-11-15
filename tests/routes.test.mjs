@@ -256,7 +256,8 @@ test('receiver crash after first ack yields unknown receipt and preserved confir
   assert.equal(failure.failure.receipt.outcome,'unknown');
   assert.equal(failure.failure.prior_receipts.length,1);
   assert.equal(failure.failure.prior_receipts[0].outcome,'processed');
-  assert.equal(h.workers[2].terminated,true,'source worker restarted rather than treating unknown as success');
+  assert.equal(h.workers[0].terminated,true,'source worker must terminate on unknown delivery');
+  assert.equal(h.workers[2].terminated,false,'replacement source worker was created');
 });
 test('rejected next send after revocation is not mislabeled processed',()=>{
   const h=fixture(),a=h.spawn('a'),b=h.spawn('b'),route=grant(h,a,b);
