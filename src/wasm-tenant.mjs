@@ -90,10 +90,12 @@ export async function open_wasm_tenant(entry) {
         actors.set(id,actor);
         try {
           actor.instance=instantiate();
+          const caller=active_guest;
           active_guest=actor.instance;
           actor.instance.exports.actor_init(type);
-          // A normal init returns to the caller. A trap leaves active_guest
-          // pointing at the failing actor for the outer guest error handler.
+          // Restore the caller only on normal return. A trap retains the
+          // failing actor so panic_code comes from the correct Wasm instance.
+          active_guest=caller;
           return id;
         } catch (e) { actors.delete(id); throw e; }
       },
