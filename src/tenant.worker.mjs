@@ -11,13 +11,13 @@ self.onmessage=async({data})=>{
     const {tenant,generation,backend,trusted}=data;
     try{
       const entry=assert_entry_url(data.entry,self.location.origin);
-      if(backend==='wasm') state={tenant,generation,backend,handler:await open_wasm_tenant(entry)};
+      if(backend==='wasm') state={tenant,generation,backend,busy:false,handler:await open_wasm_tenant(entry)};
       else if(backend==='js' && trusted===true){
         const module=await import(entry);
         if(typeof module.create_tenant!=='function')throw new Error('E_JS_FACTORY');
         const handler=await module.create_tenant({tenant,generation});
         if(typeof handler?.on_message!=='function')throw new Error('E_JS_HANDLER');
-        state={tenant,generation,backend,handler};
+        state={tenant,generation,backend,busy:false,handler};
       }else throw new Error('E_BACKEND');
       self.postMessage({protocol:PROTOCOL,op:'ready',tenant,generation,worker_instance});
     }catch(e){self.postMessage({protocol:PROTOCOL,op:'boot_failed',tenant,generation,error:error_text(e)});}
@@ -25,6 +25,11 @@ self.onmessage=async({data})=>{
   }
   if(!state || data.tenant!==state.tenant || data.generation!==state.generation)return;
   if(data.op==='call' && Number.isSafeInteger(data.id) && data.id>0){
+    if(state.busy) {
+      self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,generation:state.generation,
+        ok:false,error:'E_TENANT_BUSY'});return;
+    }
+    state.busy=true;
     try{
       const result=normalize_guest_result(await state.handler.on_message());
       self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,generation:state.generation,ok:true,result});
@@ -37,6 +42,31 @@ self.onmessage=async({data})=>{
       }
       self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,generation:state.generation,
         ok:false,error:error_text(e).slice(0,512)});
+    }finally{state.busy=false}
+    return;
+  }
+  if(data.op==='route' && Number.isSafeInteger(data.id) && data.id>0 &&
+      Number.isSafeInteger(data.route_id) && data.route_id>0) {
+    if(state.busy) {
+      self.postMessage({protocol:PROTOCOL,op:'route_result',id:data.id,tenant:state.tenant,
+        generation:state.generation,route_id:data.route_id,ok:false,error:'E_TENANT_BUSY'});
+      return;
     }
+    state.busy=true;
+    try {
+      if(typeof state.handler.on_route!=='function')throw new Error('E_ROUTE_UNSUPPORTED');
+      const result=normalize_guest_result(await state.handler.on_route({
+        actor_id:data.actor_id,wire_type:data.wire_type,buffer:data.buffer
+      }));
+      self.postMessage({protocol:PROTOCOL,op:'route_result',id:data.id,tenant:state.tenant,
+        generation:state.generation,route_id:data.route_id,ok:true,result});
+    }catch(e){
+      if(state.backend==='wasm' && e?.actor_failure?.kind==='panic') {
+        self.postMessage({protocol:PROTOCOL,op:'control',id:data.id,tenant:state.tenant,
+          generation:state.generation,control:e.actor_failure});
+      }
+      self.postMessage({protocol:PROTOCOL,op:'route_result',id:data.id,tenant:state.tenant,
+        generation:state.generation,route_id:data.route_id,ok:false,error:error_text(e).slice(0,512)});
+    }finally{state.busy=false}
   }
 };
