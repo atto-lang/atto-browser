@@ -10,6 +10,10 @@ import { tmpdir } from 'node:os';
 const fixtures=process.env.ATTO_BROWSER_FIXTURE_DIR;
 if(!fixtures)throw new Error('E_FIXTURES_REQUIRED: compile actual AttoLang guests first');
 const root=new URL('../',import.meta.url);
+// Valid 42-byte Wasm module whose main() loops forever; validates the
+// worker watchdog without relying on a JS busy-loop or mock worker.
+const hung_guest=Buffer.from('0061736d010000000105016000017e03020100070801046d61696e00000a0b01090003400c000b42000b','hex');
+assert.equal(WebAssembly.validate(hung_guest),true);
 const files=new Map([
   ['/index.html',[new URL('./browser-tenants/index.html',import.meta.url),'text/html; charset=utf-8']],
   ['/tests/browser-tenants/e2e.mjs',[new URL('./browser-tenants/e2e.mjs',import.meta.url),'text/javascript; charset=utf-8']],
@@ -18,6 +22,7 @@ const files=new Map([
     ['/src/'+name+'.mjs',[new URL('../src/'+name+'.mjs',import.meta.url),'text/javascript; charset=utf-8']]),
   ...['two-actors','actor-state','actor-overflow'].map(name=>
     ['/fixtures/'+name+'.wasm',[new URL('file://'+join(fixtures,name+'.wasm')),'application/wasm']]),
+  ['/fixtures/hung.wasm',[hung_guest,'application/wasm']],
 ]);
 const requests=[];
 const server=createServer(async(req,res)=>{
@@ -26,7 +31,7 @@ const server=createServer(async(req,res)=>{
   const item=files.get(url.pathname);
   if(req.method!=='GET' || !item) {res.writeHead(404);res.end('Not found');return}
   try {
-    const bytes=await readFile(item[0]);
+    const bytes=Buffer.isBuffer(item[0]) ? item[0] : await readFile(item[0]);
     res.writeHead(200,{'content-type':item[1],'x-content-type-options':'nosniff','cache-control':'no-store'});
     res.end(bytes);
   } catch {res.writeHead(404);res.end('Missing fixture or module')}
@@ -92,7 +97,7 @@ try {
   },'compiled Atto actor tenant E2E');
   if(result.status!=='ok')throw new Error('Browser tenant E2E failed: '+result.error+
     '\ncompleted: '+JSON.stringify(result.steps)+'\nevents: '+JSON.stringify(result.events));
-  assert.ok(result.steps.length>=17,'all browser milestones must execute');
+  assert.ok(result.steps.length>=22,'all browser milestones must execute');
   assert.ok(requests.some(x=>x.path==='/fixtures/actor-overflow.wasm'),'real actor guest downloaded');
   assert.ok(requests.every(x=>x.method==='GET'),'no source upload or server compilation');
   console.log('PASS real Chromium module Web Workers: '+result.steps.length+' integration assertions');
