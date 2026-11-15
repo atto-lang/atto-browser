@@ -6,15 +6,16 @@ async function read_bounded(response) {
   if (Number.isFinite(declared) && declared>MAX_WASM_BYTES) throw new Error('E_WASM_SIZE');
   if (response.body?.getReader) {
     const reader=response.body.getReader(), chunks=[];
-    let total=0;
+    let total=0, received_chunks=0;
     try {
       for (;;) {
         const {done,value}=await reader.read();
         if (done) break;
         if (!(value instanceof Uint8Array)) throw new Error('E_WASM_STREAM');
+        if (++received_chunks>8192) throw new Error('E_WASM_STREAM_CHUNKS');
         total+=value.byteLength;
         if (total>MAX_WASM_BYTES) throw new Error('E_WASM_SIZE');
-        chunks.push(value);
+        if(value.byteLength) chunks.push(value);
       }
     } catch(e) { try { await reader.cancel(); } catch {} throw e; }
     const bytes=new Uint8Array(total);
@@ -69,6 +70,8 @@ export async function open_wasm_tenant(entry) {
     const append=text=>{
       const bytes=text_encoder.encode(text).length;
       if (stdout_bytes+bytes>MAX_STDOUT_BYTES) throw new Error('E_STDOUT_LIMIT');
+      if (!bytes) return; // zero-byte prints may not allocate unlimited slots
+      if (stdout_chunks.length>=8192) throw new Error('E_STDOUT_CHUNKS');
       stdout_bytes+=bytes;
       stdout_chunks.push(text);
     };
