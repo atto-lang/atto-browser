@@ -17,7 +17,7 @@ self.onmessage=async({data})=>{
         if(typeof module.create_tenant!=='function')throw new Error('E_JS_FACTORY');
         const handler=await module.create_tenant({tenant,generation});
         if(typeof handler?.on_message!=='function')throw new Error('E_JS_HANDLER');
-        state={tenant,generation,backend,busy:false,handler};
+        state={tenant,generation,backend,trusted:true,busy:false,handler};
       }else throw new Error('E_BACKEND');
       self.postMessage({protocol:PROTOCOL,op:'ready',tenant,generation,worker_instance});
     }catch(e){self.postMessage({protocol:PROTOCOL,op:'boot_failed',tenant,generation,error:error_text(e)});}
@@ -45,7 +45,7 @@ self.onmessage=async({data})=>{
       self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,
         generation:state.generation,tenant:state.tenant,ok:true,result,remote_sends});
     }catch(e){
-      if(state.backend==='wasm' && e?.actor_failure?.kind==='panic') {
+      if((state.backend==='wasm' || (state.backend==='js' && state.trusted)) && e?.actor_failure?.kind==='panic') {
         // Dedicated CONTROL envelope precedes the failed result. This is a
         // logical priority lane, not a separate browser scheduling priority.
         self.postMessage({protocol:PROTOCOL,op:'control',id:data.id,tenant:state.tenant,
@@ -72,7 +72,7 @@ self.onmessage=async({data})=>{
       self.postMessage({protocol:PROTOCOL,op:'route_result',id:data.id,tenant:state.tenant,
         generation:state.generation,route_id:data.route_id,ok:true,result});
     }catch(e){
-      if(state.backend==='wasm' && e?.actor_failure?.kind==='panic') {
+      if((state.backend==='wasm' || (state.backend==='js' && state.trusted)) && e?.actor_failure?.kind==='panic') {
         self.postMessage({protocol:PROTOCOL,op:'control',id:data.id,tenant:state.tenant,
           generation:state.generation,control:e.actor_failure});
       }
