@@ -265,3 +265,108 @@ test('receiver CONTROL cannot be followed by success or recoverable pre-dispatch
     assert.equal(h.events.filter(e=>e.event==='actor_panic').length,1);
   }
 });
+
+const stateful_fixture=(h,tenant='counter')=>{
+  const id=h.send('spawn',{tenant,backend:'stateful-preview',
+    entry:'/counter.wasm',owner:'Counter',sha256:'a'.repeat(64)});
+  const worker=h.workers.at(-1);
+  ready(worker);
+  return {id,worker,handle:h.replies.find(r=>r.id===id).result};
+};
+test('host-owned stateful lease is released once after verified execution',()=>{
+  const h=mk(),{worker,handle}=stateful_fixture(h);
+  const id=h.send('call_receiver',{...handle,method:'increment',args:[25n]});
+  let a=h.supervisor.leases.snapshot(handle.tenant,handle.generation);
+  assert.equal(a.active,1);assert.equal(a.writers,1);assert.equal(a.granted,1);
+  const ticket=h.supervisor.tenants.get(handle.tenant).pending.lease;
+  assert.ok(ticket && ticket.mode==='write');
+  assert.equal(worker.messages.at(-1).lease,undefined,
+    'host-only lease capability must not cross worker boundary');
+  worker.respond({op:'receiver_result',id,tenant:handle.tenant,
+    generation:handle.generation,ok:true,
+    result:{value:'42',stdout:'',actors:1}});
+  assert.equal(h.replies.find(r=>r.id===id).result.value,'42');
+  a=h.supervisor.leases.snapshot(handle.tenant,handle.generation);
+  assert.equal(a.active,0);assert.equal(a.released,1);assert.equal(a.revoked,0);
+  worker.respond({op:'receiver_result',id,tenant:handle.tenant,
+    generation:handle.generation,ok:true,result:{value:'42',stdout:'',actors:1}});
+  assert.equal(h.supervisor.leases.snapshot(handle.tenant,handle.generation).released,1);
+  assert.equal(h.supervisor.leases.release(ticket),false,'late release is fenced');
+});
+
+test('hard worker termination revokes write lease before generation restart',()=>{
+  const h=mk(),{worker,handle}=stateful_fixture(h);
+  const id=h.send('call_receiver',{...handle,method:'increment',args:[1n]});
+  const deadLease=h.supervisor.tenants.get(handle.tenant).pending.lease;
+  worker.onerror();
+  assert.equal(err(h,id),'E_WORKER_CRASH');
+  assert.equal(worker.terminated,true);
+  assert.equal(h.workers.length,2);
+  const current=h.supervisor.tenants.get(handle.tenant);
+  assert.ok(current.generation>handle.generation);
+  assert.equal(h.supervisor.leases.snapshot(handle.tenant,current.generation).revoked,1);
+  assert.equal(h.supervisor.leases.snapshot(handle.tenant,current.generation).active,0);
+  assert.equal(h.supervisor.leases.release(deadLease),false);
+  const old=h.send('call_receiver',{...handle,method:'increment',args:[25n]});
+  assert.equal(err(h,old),'E_STALE_TENANT_HANDLE');
+  ready(h.workers[1]);
+  const readyEvt=h.events.filter(e=>e.event==='tenant_ready').at(-1);
+  const fresh={tenant:readyEvt.tenant,generation:readyEvt.generation,
+    capability:readyEvt.capability};
+  const after=h.send('call_receiver',{...fresh,method:'increment',args:[25n]});
+  assert.equal(h.supervisor.leases.snapshot(fresh.tenant,fresh.generation).active,1);
+  worker.respond({op:'receiver_result',id,tenant:handle.tenant,
+    generation:handle.generation,ok:true,result:{value:'99',stdout:'',actors:1}});
+  assert.equal(h.supervisor.leases.snapshot(fresh.tenant,fresh.generation).active,1,
+    'dead generation cannot complete or release successor work');
+  h.workers[1].respond({op:'receiver_result',id:after,tenant:fresh.tenant,
+    generation:fresh.generation,ok:true,result:{value:'42',stdout:'',actors:1}});
+  assert.equal(h.supervisor.leases.snapshot(fresh.tenant,fresh.generation).released,1);
+});
+
+test('stop while stateful write is pending revokes host lease with unknown outcome',()=>{
+  const h=mk(),{worker,handle}=stateful_fixture(h);
+  const work=h.send('call_receiver',{...handle,method:'increment',args:[2n]});
+  const ticket=h.supervisor.tenants.get(handle.tenant).pending.lease;
+  const stop=h.send('stop',handle);
+  assert.ok(h.replies.find(r=>r.id===stop)?.ok);
+  assert.equal(err(h,work),'E_STOPPED');
+  assert.equal(worker.terminated,true);
+  assert.equal(h.supervisor.leases.release(ticket),false);
+  assert.equal(h.supervisor.tenants.has(handle.tenant),false);
+  assert.throws(()=>h.supervisor.leases.snapshot(handle.tenant,handle.generation),
+    /E_STALE_LEASE_GENERATION/);
+});
+
+test('stateful protocol errors revoke host lease without accepting forged results',()=>{
+  for(const guestResult of [
+    {value:'9223372036854775808',stdout:'',actors:1},
+    {value:'42',stdout:'fake',actors:1},
+    {value:'42',stdout:'',actors:2},
+  ]){
+    const h=mk(),{worker,handle}=stateful_fixture(h);
+    const id=h.send('call_receiver',{...handle,method:'increment',args:[25n]});
+    const ticket=h.supervisor.tenants.get(handle.tenant).pending.lease;
+    worker.respond({op:'receiver_result',id,tenant:handle.tenant,
+      generation:handle.generation,ok:true,result:guestResult});
+    assert.equal(err(h,id),'E_RECEIVER_PROTOCOL');
+    assert.equal(worker.terminated,true);
+    assert.equal(h.supervisor.leases.release(ticket),false);
+  }
+});
+
+test('stateful method remains exclusive and ordinary call cannot bypass lease',()=>{
+  const h=mk(),{worker,handle}=stateful_fixture(h);
+  const forbidden=h.send('call',handle);
+  assert.equal(err(h,forbidden),'E_RECEIVER_OP');
+  const badArgs=h.send('call_receiver',{...handle,method:'increment',args:[1n,2n]});
+  assert.equal(err(h,badArgs),'E_RECEIVER_ARGS');
+  assert.equal(h.supervisor.leases.snapshot(handle.tenant,handle.generation).granted,0);
+  const id=h.send('call_receiver',{...handle,method:'increment',args:[1n]});
+  const concurrent=h.send('call_receiver',{...handle,method:'increment',args:[2n]});
+  assert.equal(err(h,concurrent),'E_TENANT_BUSY');
+  assert.equal(h.supervisor.leases.snapshot(handle.tenant,handle.generation).granted,1);
+  worker.respond({op:'receiver_result',id,tenant:handle.tenant,
+    generation:handle.generation,ok:true,result:{value:'18',stdout:'',actors:1}});
+  assert.equal(h.supervisor.leases.snapshot(handle.tenant,handle.generation).released,1);
+});
