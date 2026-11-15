@@ -62,3 +62,19 @@ For compiled Wasm actors, the only supported remote wire type currently is **sig
 Limits: 64 live grants, 64 KiB per message, 16 in-flight deliveries globally and one in-flight operation per destination. There is no unbounded queue; await acknowledgment before sending the next ordered message. Revocation fences *future* sends and cannot recall an already admitted transfer. Restart/stop fences replay using both generations and route capability.
 
 **Scope**: this version is **application-mediated routing to a real compiled actor**. It does not yet compile an AttoLang `actor.send` expression to a remote route import, and does not pretend that the `rt take`/`rt copy` compiler ownership checker currently understands this host API. Trusted JS runs with same-origin browser authority and is not an untrusted-code sandbox. A logical CONTROL notice is not an OS-level scheduling priority lane.
+
+### Compiled AttoLang remote actor sender (experimental)
+
+The Rust compiler now admits the typed `remote_actor(Counter, 1)` expression for `ActorMail<int>`. This produces an opaque negative actor reference used by ordinary `.send(value)`; neither the Wasm guest nor the sender tenant's worker receives a route capability. The application explicitly authorizes and binds the host slot:
+
+```js
+const receiver = await client.spawn('receiver', {backend:'wasm',entry:'/receiver.wasm'});
+await client.call(receiver); // creates the receiving actor
+const sender = await client.spawn('sender',{backend:'wasm',entry:'/sender.wasm'});
+const route = await client.grant_route(sender,receiver,{actor_id:1,wire_type:'i64'});
+await client.bind_route(sender,route,1);
+const receipt = await client.call(sender);
+// receipt.remote_acks contains bounded, ordered destination completion notices
+```
+
+`client.call(sender)` only succeeds after the supervisor serially delivers and acknowledges each compiled actor send (maximum 16 messages). A missing, revoked, mismatched or restarted route fails closed and restarts the source tenant; the receiver remains isolated. This is **completion of host-side delivery**, not a `Result` available to individual AttoLang `.send()` expressions. Sends are not transactional: a prior message may have been delivered before a subsequent failure. This profile accepts only little-endian signed `i64` messages, static slots and application-issued route capabilities. Browser-level physical zero-copy and compiler ownership/lifetime verification are not claimed.
