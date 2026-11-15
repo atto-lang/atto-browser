@@ -17,7 +17,7 @@ export function assert_entry_url(entry, origin) {
 export function assert_request(message) {
   if (!message || Object.getPrototypeOf(message) !== Object.prototype ||
       message.protocol !== PROTOCOL || !Number.isSafeInteger(message.id) || message.id < 1) throw new Error('E_PROTOCOL');
-  if (!['spawn', 'call', 'stop', 'list', 'grant_route', 'send_route', 'revoke_route'].includes(message.op)) throw new Error('E_OPERATION');
+  if (!['spawn', 'call', 'stop', 'list', 'grant_route', 'send_route', 'revoke_route', 'bind_route'].includes(message.op)) throw new Error('E_OPERATION');
   if (message.op !== 'list') assert_tenant_id(message.tenant);
   return message;
 }
