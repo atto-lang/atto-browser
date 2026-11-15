@@ -1,5 +1,6 @@
 import { PROTOCOL, assert_tenant_id } from './protocol.mjs';
 import { assert_route_id, assert_route_capability, assert_route_buffer } from './route-protocol.mjs';
+import {assert_send_receipt,assert_send_failure} from './send-receipt.mjs';
 
 export class BrowserTenantClient {
   #worker;
@@ -23,8 +24,27 @@ export class BrowserTenantClient {
       const entry = this.#pending.get(data.id);
       if (!entry) return;
       this.#pending.delete(data.id);
-      if (data.ok) entry.resolve(data.result);
-      else entry.reject(new Error(data.error || 'E_UNKNOWN'));
+      if(data.ok) {
+        try {
+          if(data.result?.receipt)
+            data.result.receipt=assert_send_receipt(data.result.receipt);
+          if(data.result?.remote_receipts) {
+            if(!Array.isArray(data.result.remote_receipts) ||
+               data.result.remote_receipts.length>16)
+              throw new Error('E_RECEIPT_PROTOCOL');
+            data.result.remote_receipts=data.result.remote_receipts.map(assert_send_receipt);
+            if(data.result.remote_receipts.some(x=>x.outcome!=='processed'))
+              throw new Error('E_RECEIPT_PROTOCOL');
+          }
+          entry.resolve(data.result);
+        }catch(error){entry.reject(error)}
+      }else{
+        const error=new Error(data.error || 'E_UNKNOWN');
+        try {
+          if(data.failure) error.failure=assert_send_failure(data.failure);
+          entry.reject(error);
+        }catch(e){entry.reject(e)}
+      }
     };
     this.#worker.onerror = () => this.#abort('E_SUPERVISOR_DOWN');
     this.#worker.onmessageerror = () => this.#abort('E_SUPERVISOR_MESSAGE');
