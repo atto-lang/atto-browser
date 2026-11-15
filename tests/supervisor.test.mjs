@@ -115,3 +115,34 @@ test('guest cannot spoof trusted tenant or generation fields',()=>{
   assert.equal(err(h,bad),'E_GUEST_RESULT');
   assert.equal(h.workers[0].terminated,true);
 });
+
+test('Wasm actor CONTROL panic is surfaced before tenant_down, without exposing authority',()=>{
+  const h=mk();const spawned=spawn(h);ready(h.workers[0]);
+  const handle=h.replies.find(x=>x.id===spawned).result;
+  const id=h.send('call',handle);
+  const control={kind:'panic',actor_id:1,parent_id:0,actor_type:'W',reason:'E_GUEST_PANIC_1'};
+  h.workers[0].respond({op:'control',id,tenant:'t1',generation:handle.generation,control});
+  h.workers[0].respond({op:'control',id,tenant:'t1',generation:handle.generation,control});
+  assert.equal(h.events.filter(e=>e.event==='actor_panic').length,1,'duplicate CONTROL notice must be fenced');
+  h.workers[0].respond({op:'result',id,generation:handle.generation,ok:false,error:'E_GUEST_PANIC_1'});
+  assert.equal(err(h,id),'E_GUEST_PANIC_1');
+  const panic_index=h.events.findIndex(e=>e.event==='actor_panic');
+  const down_index=h.events.findIndex(e=>e.event==='tenant_down');
+  assert.ok(panic_index>=0 && panic_index<down_index,'CONTROL must precede tenant failure');
+  const evt=h.events[panic_index];
+  assert.equal(evt.priority,'CONTROL');
+  assert.equal(evt.actor_id,1);
+  assert.equal(evt.parent_id,0);
+  assert.equal(evt.actor_type,'W');
+  assert.equal(evt.capability,undefined);
+  assert.equal(h.workers[0].terminated,true);
+});
+test('malformed CONTROL notices fail closed and never become supervisor events',()=>{
+  const h=mk();spawn(h);ready(h.workers[0]);
+  const id=h.send('call',{tenant:'t1'});
+  h.workers[0].respond({op:'control',id,tenant:'t1',generation:1,
+    control:{kind:'panic',actor_id:999,parent_id:0,actor_type:'W',reason:'E_GUEST_PANIC_1'}});
+  assert.equal(err(h,id),'E_CONTROL_PROTOCOL');
+  assert.equal(h.events.some(e=>e.event==='actor_panic'),false);
+  assert.equal(h.workers[0].terminated,true);
+});
