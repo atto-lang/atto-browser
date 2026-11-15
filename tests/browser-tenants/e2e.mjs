@@ -38,6 +38,28 @@ const off=client.on_event(event=>{report.events.push(event)});
     check(result_b.value==='0' && result_b.actors===1,'separate Rust-compiled tenant guest executed');
     check(result_b.stdout.trim()==='main done\n40\n42','actor mailbox FIFO and main-to-actor ordering');
 
+    const hung=await client.spawn('tenant_hung',{backend:'wasm',entry:'/fixtures/hung.wasm'});
+    const hung_call=client.call(hung);
+    // Exercise a healthy tenant while an unrelated guest blocks its worker.
+    const healthy=await client.spawn('tenant_healthy',{backend:'wasm',entry:'/fixtures/two-actors.wasm'});
+    const healthy_result=await client.call(healthy);
+    check(healthy_result.actors===2 && healthy_result.value==='0',
+      'uncooperative Wasm tenant cannot block neighboring worker');
+    await rejects(hung_call,'E_CALL_TIMEOUT');
+    const hung_down=await wait_for(()=>report.events.find(x=>x.tenant==='tenant_hung' &&
+      x.event==='tenant_down' && x.generation===hung.generation),'watchdog tenant_down');
+    check(hung_down.reason==='E_CALL_TIMEOUT','watchdog terminates infinite-loop Wasm');
+    const hung_ready=await wait_for(()=>report.events.find(x=>x.tenant==='tenant_hung' &&
+      x.event==='tenant_ready' && x.generation>hung.generation),'watchdog restart');
+    const replacement={tenant:hung_ready.tenant,generation:hung_ready.generation,
+      capability:hung_ready.capability};
+    check(replacement.capability!==hung.capability,'watchdog restart rotates capability');
+    await rejects(client.stop(hung),'E_STALE_TENANT_HANDLE');
+    await client.stop(replacement);
+    await client.stop(healthy);
+    check((await client.list()).filter(x=>x.ready).length===2,
+      'watchdog and cleanup leave original tenants healthy');
+
     const failed=await client.spawn('tenant_fault',{backend:'wasm',entry:'/fixtures/actor-overflow.wasm'});
     await rejects(client.call(failed),'E_GUEST_PANIC_1');
     const notice=await wait_for(()=>report.events.find(x=>x.event==='actor_panic' &&
