@@ -124,7 +124,7 @@ export class TenantSupervisor {
     }
     if (data.op==='control' && state.ready && state.pending && data.id===state.pending.id) {
       const notice=data.control;
-      if(state.backend!=='wasm' || data.tenant!==state.id ||
+      if(!['wasm','js'].includes(state.backend) || data.tenant!==state.id ||
           notice?.kind!=='panic' || !Number.isSafeInteger(notice.actor_id) ||
           notice.actor_id<1 || notice.actor_id>64 ||
           !Number.isSafeInteger(notice.parent_id) ||
@@ -288,7 +288,7 @@ export class TenantSupervisor {
     if(!Number.isSafeInteger(msg.actor_id) || msg.actor_id<0 || msg.actor_id>64)
       throw new Error('E_ROUTE_ACTOR');
     if(msg.wire_type==='i64') {
-      if(target.backend!=='wasm' || msg.actor_id<1)throw new Error('E_ROUTE_WIRE');
+      if(!['wasm','js'].includes(target.backend) || msg.actor_id<1)throw new Error('E_ROUTE_WIRE');
     } else if(msg.wire_type==='bytes') {
       if(target.backend!=='js' || msg.actor_id!==0)throw new Error('E_ROUTE_WIRE');
     } else throw new Error('E_ROUTE_WIRE');
