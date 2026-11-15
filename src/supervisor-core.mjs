@@ -73,6 +73,7 @@ export class TenantSupervisor {
   #worker_message(state,generation,data) {
     if (this.tenants.get(state.id)!==state || generation!==state.generation || data?.protocol!==PROTOCOL || data.generation!==generation) return;
     if (data.op==='ready' && !state.ready) {
+      if (data.tenant!==state.id) {this.#failure(state,generation,'E_WORKER_PROTOCOL');return;}
       if(data.worker_instance!==undefined) {
         if(typeof data.worker_instance!=='string' ||
             !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.worker_instance)) {
@@ -121,7 +122,10 @@ export class TenantSupervisor {
       } else this.#failure(state,generation,typeof data.error==='string' ? data.error.slice(0,512) : 'E_GUEST_PANIC',id);
       return;
     }
-    if (data.op==='boot_failed' && !state.ready) this.#failure(state,generation,data.error || 'E_BOOT_FAILED');
+    if (data.op==='boot_failed' && !state.ready) {
+      this.#failure(state,generation,data.tenant===state.id &&
+        typeof data.error==='string' ? data.error.slice(0,512) : 'E_BOOT_FAILED');
+    }
   }
   #authorize(msg,state) {
     if (!Number.isSafeInteger(msg.generation) || msg.generation!==state.generation ||
