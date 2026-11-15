@@ -41,6 +41,7 @@ export function create_send_receipt(route,receipt_id,outcome,code) {
 }
 export function assert_send_failure(value) {
   if(!value || Object.getPrototypeOf(value)!==Object.prototype ||
+      value.protocol!==RECEIPT_PROTOCOL ||
       !['rejected','unknown'].includes(value.outcome) ||
       !RECEIPT_CODES.includes(value.code) || value.code==='OK' ||
       !Array.isArray(value.prior_receipts) || value.prior_receipts.length>16)
@@ -55,5 +56,5 @@ export function assert_send_failure(value) {
     receipt,prior_receipts};
 }
 export function create_send_failure(code,outcome,receipt=null,prior_receipts=[]) {
-  return assert_send_failure({code,outcome,receipt,prior_receipts});
+  return assert_send_failure({protocol:RECEIPT_PROTOCOL,code,outcome,receipt,prior_receipts});
 }
