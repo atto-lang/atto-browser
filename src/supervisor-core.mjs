@@ -391,6 +391,11 @@ export class TenantSupervisor {
       source_generation:source.generation};
     state.index++;
     this.active_route_sends++;
+    // A batch can contain 16 sequential sends: bound each delivery, not the
+    // entire batch, to the original single-call timeout.
+    clearTimeout(source.timer);
+    source.timer=setTimeout(()=>this.#failure(source,source.generation,'E_CALL_TIMEOUT'),
+      this.call_timeout_ms);
     target.timer=setTimeout(()=>this.#failure(target,target.generation,'E_ROUTE_TIMEOUT'),
       this.call_timeout_ms);
     try {
@@ -411,17 +416,37 @@ export class TenantSupervisor {
       if(route.source===state || route.target===state)this.routes.delete(id);
     state.bindings.clear();
   }
-  #failure(state,generation,reason,request_id=null) {
+  #failure(state,generation,reason,request_id=null,detail=null) {
     if (this.tenants.get(state.id)!==state || state.generation!==generation) return;
     clearTimeout(state.timer);state.timer=null;
     const pending=state.pending;
     state.pending=null;
     if(pending?.kind==='route' || pending?.kind==='remote')this.active_route_sends--;
+    let failure=detail;
+    if(pending?.kind==='route') {
+      const code=this.#route_error_code(reason);
+      failure=create_send_failure(code,'unknown',
+        create_send_receipt(pending.route,pending.receipt_id,'unknown',code));
+    } else if(pending?.kind==='call_remote') {
+      // If a send was already dispatched, a watchdog/crash cannot say whether
+      // the receiver processed it. Never label it "rejected" or retry it.
+      const inflight=[...this.tenants.values()].find(t=>t.pending?.kind==='remote' &&
+        t.pending.source===state && t.pending.source_generation===generation)?.pending;
+      const outcome=failure?.outcome ?? (inflight ? 'unknown':'rejected');
+      const code=failure?.code ?? this.#route_error_code(reason);
+      const receipt=failure?.receipt ?? (inflight
+        ? create_send_receipt(inflight.route,inflight.receipt_id,outcome,code):null);
+      failure=create_send_failure(code,outcome,receipt,pending.receipts);
+    }
     this.#drop_routes(state);
     state.worker?.terminate(); state.worker=null;
-    if(pending?.kind==='remote')
-      this.#failure(pending.source,pending.source_generation,'E_REMOTE_DELIVERY: '+reason);
-    else if(pending) this.#reply(pending.id,false,undefined,reason);
+    if(pending?.kind==='remote') {
+      const code=this.#route_error_code(reason);
+      const receipt=create_send_receipt(pending.route,pending.receipt_id,'unknown',code);
+      this.#failure(pending.source,pending.source_generation,
+        'E_REMOTE_DELIVERY: '+reason,null,
+        create_send_failure(code,'unknown',receipt));
+    } else if(pending) this.#reply(pending.id,false,undefined,reason,failure);
     else if (request_id!==null) this.#reply(request_id,false,undefined,reason);
     this.#event('tenant_down',state.id,generation,reason);
     if (state.restarts < this.restart_limit) {
@@ -437,11 +462,23 @@ export class TenantSupervisor {
     this.tenants.delete(state.id);
     this.#drop_routes(state);
     if(state.pending){
-      if(state.pending.kind==='route' || state.pending.kind==='remote')this.active_route_sends--;
-      if(state.pending.kind==='remote')
-        this.#failure(state.pending.source,state.pending.source_generation,'E_REMOTE_DELIVERY: '+reason);
-      else this.#reply(state.pending.id,false,undefined,reason);
+      const pending=state.pending;
       state.pending=null;
+      if(pending.kind==='route' || pending.kind==='remote')this.active_route_sends--;
+      if(pending.kind==='remote') {
+        const code=this.#route_error_code(reason);
+        const receipt=create_send_receipt(pending.route,pending.receipt_id,'unknown',code);
+        this.#failure(pending.source,pending.source_generation,'E_REMOTE_DELIVERY: '+reason,
+          null,create_send_failure(code,'unknown',receipt));
+      } else if(pending.kind==='route') {
+        const code=this.#route_error_code(reason);
+        this.#reply(pending.id,false,undefined,reason,create_send_failure(code,'unknown',
+          create_send_receipt(pending.route,pending.receipt_id,'unknown',code)));
+      } else if(pending.kind==='call_remote') {
+        const code=this.#route_error_code(reason);
+        this.#reply(pending.id,false,undefined,reason,
+          create_send_failure(code,'unknown',null,pending.receipts));
+      } else this.#reply(pending.id,false,undefined,reason);
     }
     if(state.boot_request!==null){this.#reply(state.boot_request,false,undefined,reason);state.boot_request=null;}
     this.#event(failed?'tenant_failed':'tenant_stopped',state.id,state.generation,reason);
