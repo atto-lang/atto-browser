@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "test:browser-tenants": "node tests/browser-tenants-e2e.mjs"
+    "test:browser-tenants": "node tests/browser-tenants-e2e.mjs",
+    "test:browser-js": "node tests/browser-js-worker-e2e.mjs"
   },
   "engines": {
     "node": ">=20"
