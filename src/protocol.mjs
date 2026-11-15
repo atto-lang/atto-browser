@@ -11,7 +11,7 @@ export function assert_tenant_id(id) {
 export function assert_entry_url(entry, origin) {
   if (typeof entry !== 'string' || entry.length > 2048) throw new Error('E_ENTRY_URL');
   const url = new URL(entry, origin);
-  if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin || url.username || url.password) throw new Error('E_ENTRY_ORIGIN');
+  if (!['http:', 'https:', 'blob:'].includes(url.protocol) || url.origin !== origin || url.username || url.password) throw new Error('E_ENTRY_ORIGIN');
   return url.href;
 }
 export function assert_request(message) {
