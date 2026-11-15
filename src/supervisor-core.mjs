@@ -132,7 +132,7 @@ export class TenantSupervisor {
     }
     if (data.op==='control' && state.ready && state.pending && data.id===state.pending.id) {
       const notice=data.control;
-      if(!['wasm','js'].includes(state.backend) || data.tenant!==state.id ||
+      if(!['wasm','js','receiver'].includes(state.backend) || data.tenant!==state.id ||
           notice?.kind!=='panic' || !Number.isSafeInteger(notice.actor_id) ||
           notice.actor_id<1 || notice.actor_id>64 ||
           !Number.isSafeInteger(notice.parent_id) ||
