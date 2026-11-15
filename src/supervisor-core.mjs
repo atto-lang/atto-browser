@@ -19,6 +19,7 @@ export class TenantSupervisor {
     this.tenants = new Map();
     this.routes = new Map();
     this.next_route_id = 0;
+    this.next_internal_id = 0;
     this.active_route_sends = 0;
     this.next_generation = 0; // monotonic supervisor-wide; never reissue incarnation
   }
@@ -33,6 +34,7 @@ export class TenantSupervisor {
         case 'call': this.#call(msg); break;
         case 'stop': this.#stop(msg); break;
         case 'grant_route': this.#grant_route(msg); break;
+        case 'bind_route': this.#bind_route(msg); break;
         case 'send_route': this.#send_route(msg); break;
         case 'revoke_route': this.#revoke_route(msg); break;
       }
@@ -52,7 +54,7 @@ export class TenantSupervisor {
     const entry = assert_entry_url(msg.entry, this.origin);
     const state = {id:msg.tenant,backend:msg.backend,entry,trusted:msg.trusted === true,
                    generation:0,capability:null,worker_instance:null,restarts:0,worker:null,
-                   pending:null,boot_request:msg.id,ready:false,timer:null};
+                   pending:null,bindings:new Map(),boot_request:msg.id,ready:false,timer:null};
     this.tenants.set(state.id,state);
     this.#start(state);
   }
@@ -70,6 +72,7 @@ export class TenantSupervisor {
     catch (e) { this.#retire(state,'E_WORKER_CREATE: '+error_text(e),true); return; }
     state.worker = worker;
     state.worker_instance=null;
+    state.bindings.clear();
     state.ready = false;
     worker.onmessage = ({data}) => this.#worker_message(state,generation,data);
     worker.onerror = () => this.#failure(state,generation,'E_WORKER_CRASH');
@@ -119,6 +122,27 @@ export class TenantSupervisor {
       }
       return;
     }
+    if(data.op==='route_result' && state.ready && state.pending?.kind==='remote' &&
+        data.tenant===state.id && data.id===state.pending.id &&
+        data.route_id===state.pending.route_id) {
+      const pending=state.pending;
+      clearTimeout(state.timer);state.timer=null;state.pending=null;
+      this.active_route_sends--;
+      if(data.ok) {
+        try {normalize_guest_result(data.result)}
+        catch {
+          this.#failure(pending.source,pending.source_generation,'E_REMOTE_RESULT');
+          this.#failure(state,generation,'E_REMOTE_RESULT');return;
+        }
+        this.#deliver_guest_next(pending.source);
+      } else {
+        const reason=typeof data.error==='string' ? data.error.slice(0,256) : 'E_REMOTE_GUEST';
+        this.#failure(pending.source,pending.source_generation,'E_REMOTE_DELIVERY: '+reason);
+        if(reason.startsWith('E_GUEST_PANIC') || reason.startsWith('E_GUEST_TRAP'))
+          this.#failure(state,generation,reason);
+      }
+      return;
+    }
     if(data.op==='route_result' && state.ready && state.pending?.kind==='route' &&
         data.tenant===state.id && data.id===state.pending.id &&
         data.route_id===state.pending.route_id) {
@@ -145,14 +169,31 @@ export class TenantSupervisor {
       return;
     }
     if (data.op==='result' && state.ready && state.pending?.kind==='call' && data.id===state.pending.id) {
-      clearTimeout(state.timer);state.timer=null;
-      const id=state.pending.id;state.pending=null;
+      const id=state.pending.id;
       if (data.ok) {
         let result;
         try { result=normalize_guest_result(data.result); }
-        catch { this.#failure(state,generation,'E_GUEST_RESULT',id); return; }
-        this.#reply(id,true,{tenant:state.id,generation,...result});
-      } else this.#failure(state,generation,typeof data.error==='string' ? data.error.slice(0,512) : 'E_GUEST_PANIC',id);
+        catch { this.#failure(state,generation,'E_GUEST_RESULT'); return; }
+        const messages=data.remote_sends ?? [];
+        if(!Array.isArray(messages) || messages.length>16 ||
+          (messages.length>0 && (state.backend!=='wasm' || data.tenant!==state.id)) ||
+          messages.some(m=>!m || !Number.isSafeInteger(m.slot) ||
+            m.slot<1 || m.slot>16 || typeof m.value!=='bigint' ||
+            m.value<-(1n<<63n) || m.value>(1n<<63n)-1n)) {
+          this.#failure(state,generation,'E_REMOTE_PROTOCOL');return;
+        }
+        if(messages.length===0) {
+          clearTimeout(state.timer);state.timer=null;state.pending=null;
+          this.#reply(id,true,{tenant:state.id,generation,...result});
+        } else {
+          // Completion ack is delayed until every remote receive returns.
+          // This is a host-level batch ack, not yet a per-send Result<T,E>.
+          state.pending={kind:'call_remote',id,messages,index:0,
+            result:{tenant:state.id,generation,...result}};
+          this.#deliver_guest_next(state);
+        }
+      } else this.#failure(state,generation,
+        typeof data.error==='string' ? data.error.slice(0,512) : 'E_GUEST_PANIC');
       return;
     }
     if (data.op==='boot_failed' && !state.ready) {
@@ -209,6 +250,24 @@ export class TenantSupervisor {
     this.#reply(msg.id,true,{route_id:id,route_capability:capability,wire_type:msg.wire_type,
       actor_id:msg.actor_id,target_tenant:target.id,target_generation:target.generation});
   }
+  #bind_route(msg) {
+    const route=this.#route_authorize(msg),source=route.source;
+    if(route.wire_type!=='i64' || source.backend!=='wasm')
+      throw new Error('E_ROUTE_WIRE');
+    if(!source.ready || !route.target.ready)throw new Error('E_ROUTE_NOT_READY');
+    const slot=msg.slot;
+    if(!Number.isSafeInteger(slot) || slot<1 || slot>16)throw new Error('E_ROUTE_SLOT');
+    const current=source.bindings.get(slot);
+    if(current && this.routes.has(current))throw new Error('E_ROUTE_SLOT_IN_USE');
+    try {
+      // No route ID/capability crosses into guest Wasm. The worker gets only
+      // permission to use a specific, supervisor-bound integer slot.
+      source.worker.postMessage({protocol:PROTOCOL,op:'bind_route',
+        tenant:source.id,generation:source.generation,slot});
+    }catch(error){this.#failure(source,source.generation,'E_ROUTE_BIND_POST');return;}
+    source.bindings.set(slot,route.id);
+    this.#reply(msg.id,true,{slot,bound:true});
+  }
   #route_authorize(msg) {
     const source=this.tenants.get(msg.tenant);
     if(!source)throw new Error('E_NO_TENANT');
@@ -245,6 +304,49 @@ export class TenantSupervisor {
         buffer},[buffer]);
     }catch(error){this.#failure(target,target.generation,'E_ROUTE_POST: '+error_text(error))}
   }
+  #deliver_guest_next(source) {
+    if(this.tenants.get(source.id)!==source || source.pending?.kind!=='call_remote')return;
+    const state=source.pending;
+    if(state.index===state.messages.length) {
+      clearTimeout(source.timer);source.timer=null;
+      source.pending=null;
+      this.#reply(state.id,true,state.result);
+      return;
+    }
+    const message=state.messages[state.index];
+    const id=source.bindings.get(message.slot);
+    const route=this.routes.get(id);
+    if(!route || route.source!==source ||
+        route.source_generation!==source.generation ||
+        this.tenants.get(route.target.id)!==route.target ||
+        route.target.generation!==route.target_generation ||
+        route.wire_type!=='i64') {
+      this.#failure(source,source.generation,'E_REMOTE_ROUTE_STALE');return;
+    }
+    const target=route.target;
+    if(!target.ready || target.pending || this.active_route_sends>=MAX_ROUTE_INFLIGHT) {
+      this.#failure(source,source.generation,'E_REMOTE_BACKPRESSURE');return;
+    }
+    if(this.next_internal_id>=Number.MAX_SAFE_INTEGER) {
+      this.#failure(source,source.generation,'E_REMOTE_ID_EXHAUSTED');return;
+    }
+    // Canonical signed i64 little-endian wire contract shared with the Rust
+    // compiler and atto-source.wasm.
+    const buffer=new ArrayBuffer(8);
+    new DataView(buffer).setBigInt64(0,message.value,true);
+    const sequence=++this.next_internal_id;
+    target.pending={kind:'remote',id:sequence,route_id:route.id,source,
+      source_generation:source.generation};
+    state.index++;
+    this.active_route_sends++;
+    target.timer=setTimeout(()=>this.#failure(target,target.generation,'E_ROUTE_TIMEOUT'),
+      this.call_timeout_ms);
+    try {
+      target.worker.postMessage({protocol:PROTOCOL,op:'route',id:sequence,
+        tenant:target.id,generation:target.generation,route_id:route.id,
+        wire_type:'i64',actor_id:route.actor_id,buffer},[buffer]);
+    }catch(error){this.#failure(target,target.generation,'E_ROUTE_POST: '+error_text(error))}
+  }
   #revoke_route(msg) {
     const route=this.#route_authorize(msg);
     this.routes.delete(route.id);
@@ -255,16 +357,19 @@ export class TenantSupervisor {
   #drop_routes(state) {
     for(const [id,route] of this.routes)
       if(route.source===state || route.target===state)this.routes.delete(id);
+    state.bindings.clear();
   }
   #failure(state,generation,reason,request_id=null) {
     if (this.tenants.get(state.id)!==state || state.generation!==generation) return;
     clearTimeout(state.timer);state.timer=null;
     const pending=state.pending;
     state.pending=null;
-    if(pending?.kind==='route')this.active_route_sends--;
+    if(pending?.kind==='route' || pending?.kind==='remote')this.active_route_sends--;
     this.#drop_routes(state);
     state.worker?.terminate(); state.worker=null;
-    if (pending) this.#reply(pending.id,false,undefined,reason);
+    if(pending?.kind==='remote')
+      this.#failure(pending.source,pending.source_generation,'E_REMOTE_DELIVERY: '+reason);
+    else if(pending) this.#reply(pending.id,false,undefined,reason);
     else if (request_id!==null) this.#reply(request_id,false,undefined,reason);
     this.#event('tenant_down',state.id,generation,reason);
     if (state.restarts < this.restart_limit) {
@@ -280,8 +385,11 @@ export class TenantSupervisor {
     this.tenants.delete(state.id);
     this.#drop_routes(state);
     if(state.pending){
-      if(state.pending.kind==='route')this.active_route_sends--;
-      this.#reply(state.pending.id,false,undefined,reason);state.pending=null;
+      if(state.pending.kind==='route' || state.pending.kind==='remote')this.active_route_sends--;
+      if(state.pending.kind==='remote')
+        this.#failure(state.pending.source,state.pending.source_generation,'E_REMOTE_DELIVERY: '+reason);
+      else this.#reply(state.pending.id,false,undefined,reason);
+      state.pending=null;
     }
     if(state.boot_request!==null){this.#reply(state.boot_request,false,undefined,reason);state.boot_request=null;}
     this.#event(failed?'tenant_failed':'tenant_stopped',state.id,state.generation,reason);
