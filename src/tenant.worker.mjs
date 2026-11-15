@@ -1,5 +1,6 @@
 import { PROTOCOL, assert_entry_url, error_text, normalize_guest_result } from './protocol.mjs';
 import { open_wasm_tenant } from './wasm-tenant.mjs';
+import { open_receiver_tenant } from './receiver-tenant.mjs';
 
 const worker_instance=crypto.randomUUID(); // diagnostic identity, not a security capability
 let state=null, booting=false;
@@ -12,6 +13,8 @@ self.onmessage=async({data})=>{
     try{
       const entry=assert_entry_url(data.entry,self.location.origin);
       if(backend==='wasm') state={tenant,generation,backend,busy:false,handler:await open_wasm_tenant(entry)};
+      else if(backend==='receiver') state={tenant,generation,backend,busy:false,
+        handler:await open_receiver_tenant(entry,data.owner,data.sha256)};
       else if(backend==='js' && trusted===true){
         const module=await import(entry);
         if(typeof module.create_tenant!=='function')throw new Error('E_JS_FACTORY');
@@ -28,6 +31,32 @@ self.onmessage=async({data})=>{
     if(state.backend!=='wasm' || !Number.isSafeInteger(data.slot) ||
        data.slot<1 || data.slot>16 || typeof state.handler.bind_route!=='function')return;
     state.handler.bind_route(data.slot);
+    return;
+  }
+  if(data.op==='call_receiver' && Number.isSafeInteger(data.id) && data.id>0 &&
+     state.backend==='receiver') {
+    if(state.busy) {
+      self.postMessage({protocol:PROTOCOL,op:'receiver_result',
+        tenant:state.tenant,generation:state.generation,id:data.id,
+        ok:false,error:'E_TENANT_BUSY'});
+      return;
+    }
+    state.busy=true;
+    try {
+      const result=normalize_guest_result(state.handler.on_receiver(data.method,data.args));
+      self.postMessage({protocol:PROTOCOL,op:'receiver_result',id:data.id,
+        tenant:state.tenant,generation:state.generation,ok:true,result});
+    }catch(error){
+      if(error?.actor_failure?.kind==='panic') {
+        // Same CONTROL-before-result ordering as other actor guest traps.
+        self.postMessage({protocol:PROTOCOL,op:'control',id:data.id,
+          tenant:state.tenant,generation:state.generation,
+          control:error.actor_failure});
+      }
+      self.postMessage({protocol:PROTOCOL,op:'receiver_result',id:data.id,
+        tenant:state.tenant,generation:state.generation,ok:false,
+        error:error_text(error).slice(0,256)});
+    }finally {state.busy=false}
     return;
   }
   if(data.op==='call' && Number.isSafeInteger(data.id) && data.id>0){
