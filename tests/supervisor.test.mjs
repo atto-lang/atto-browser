@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TenantSupervisor } from '../src/supervisor-core.mjs';
-import { PROTOCOL } from '../src/protocol.mjs';
+import { PROTOCOL, assert_entry_url } from '../src/protocol.mjs';
 const mk = () => {
   const workers=[],replies=[],events=[];
   const supervisor=new TenantSupervisor({origin:'https://app.example',restart_limit:1,
@@ -69,4 +69,10 @@ test('second crash retires tenant after restart budget',()=>{
   const id=h.send('call',{tenant:'t1'});
   assert.equal(err(h,id),'E_NO_TENANT');
   assert.equal(h.events.at(-1).event,'tenant_failed');
+});
+
+test('in-browser compiler blob URLs must carry the same origin',()=>{
+  assert.equal(assert_entry_url('blob:https://app.example/fake-id','https://app.example'),'blob:https://app.example/fake-id');
+  assert.throws(()=>assert_entry_url('blob:https://evil.example/id','https://app.example'),/E_ENTRY_ORIGIN/);
+  assert.throws(()=>assert_entry_url('data:text/javascript,alert(1)','https://app.example'),/E_ENTRY_ORIGIN/);
 });
