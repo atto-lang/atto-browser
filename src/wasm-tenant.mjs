@@ -119,6 +119,33 @@ export async function open_wasm_tenant(entry) {
     return instance;
   }
   const main=instantiate();
+  function drain_mail() {
+    let cursor=0,steps=0;
+    while(cursor<queued.length) {
+      if(++steps>65536)throw new Error('E_DISPATCH_BUDGET');
+      const id=queued[cursor++],actor=actors.get(id);
+      if(!actor || !actor.instance)throw new Error('E_ACTOR_REF');
+      const payload=actor.mailbox.shift();
+      active_guest=actor.instance;
+      active_actor=actor;
+      actor.instance.exports.actor_receive(actor.type,payload,++actor.sequence);
+      active_guest=main;
+      active_actor=null;
+      if(cursor>=1024){queued.splice(0,cursor);cursor=0;}
+    }
+    queued.length=0;
+  }
+  function make_guest_error(error) {
+    const code=active_guest?.exports.panic_code?.value;
+    const failure=new Error(code ? `E_GUEST_PANIC_${code}` :
+      'E_GUEST_TRAP: '+String(error?.message||error));
+    if(active_actor) {
+      failure.actor_failure={kind:'panic',actor_id:active_actor.id,
+        parent_id:active_actor.parent_id,actor_type:types[active_actor.type],
+        reason:failure.message.slice(0,256)};
+    }
+    return failure;
+  }
   return {
     async on_message(){
       if(executions++!==0)throw new Error('E_MAIN_ALREADY_CALLED');
@@ -129,39 +156,27 @@ export async function open_wasm_tenant(entry) {
         active_actor=null;
         value=main.exports.main();
         if (typeof value!=='bigint') throw new Error('E_GUEST_SIGNATURE');
-        let cursor=0, steps=0;
-        while(cursor<queued.length) {
-          if(++steps>65536) throw new Error('E_DISPATCH_BUDGET');
-          const id=queued[cursor++],actor=actors.get(id);
-          if(!actor || !actor.instance)throw new Error('E_ACTOR_REF');
-          const payload=actor.mailbox.shift();
-          active_guest=actor.instance;
-          active_actor=actor;
-          actor.instance.exports.actor_receive(actor.type,payload,++actor.sequence);
-          active_guest=main;
-          active_actor=null;
-          // Release processed admission slots before more messages arrive.
-          // Keep a separate total-step limit to stop self-mailbox loops.
-          if(cursor>=1024) { queued.splice(0,cursor);cursor=0; }
-        }
-        queued.length=0;
-      }catch(e){
-        const code=active_guest?.exports.panic_code?.value;
-        const failure=new Error(code ? `E_GUEST_PANIC_${code}` : 'E_GUEST_TRAP: '+String(e?.message||e));
-        if (active_actor) {
-          // Only the trusted Wasm host constructs this notice. Guest Wasm
-          // cannot directly emit CONTROL messages or choose actor metadata.
-          failure.actor_failure={
-            kind:'panic',
-            actor_id:active_actor.id,
-            parent_id:active_actor.parent_id,
-            actor_type:types[active_actor.type],
-            reason:failure.message.slice(0,256),
-          };
-        }
-        throw failure;
-      }
+        drain_mail();
+      }catch(e){throw make_guest_error(e);}
       return {value:String(value),stdout:stdout_chunks.join(''),actors:actors.size};
+    },
+    async on_route({actor_id,wire_type,buffer}) {
+      if(executions!==1)throw new Error('E_GUEST_NOT_READY');
+      if(wire_type!=='i64' || !(buffer instanceof ArrayBuffer) || buffer.byteLength!==8)
+        throw new Error('E_ROUTE_WIRE');
+      const actor=actors.get(actor_id);
+      if(!actor || !actor.instance)throw new Error('E_ACTOR_REF');
+      const payload=new DataView(buffer).getBigInt64(0,true);
+      stdout_chunks=[];stdout_bytes=0;
+      try {
+        active_guest=actor.instance;
+        active_actor=actor;
+        actor.instance.exports.actor_receive(actor.type,payload,++actor.sequence);
+        active_guest=main;
+        active_actor=null;
+        drain_mail();
+      }catch(e){throw make_guest_error(e)}
+      return {value:'delivered',stdout:stdout_chunks.join(''),actors:actors.size};
     },
     async dispose(){actors.clear(); queued.length=0;}
   };
