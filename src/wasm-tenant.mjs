@@ -129,6 +129,12 @@ export async function open_wasm_tenant(entry) {
     return instance;
   }
   const main=instantiate();
+  // Export *presence* does not prove the browser-guest ABI. Reject a guest
+  // whose function arity would otherwise silently discard route arguments.
+  // There is no Wasm start section, so no guest function runs before admission.
+  if(main.exports.main.length!==0)throw new Error('E_WASM_MAIN_SIGNATURE');
+  if(actor_enabled && (main.exports.actor_init.length!==1 ||
+      main.exports.actor_receive.length!==3))throw new Error('E_WASM_ACTOR_SIGNATURE');
   function drain_mail() {
     let cursor=0,steps=0;
     while(cursor<queued.length) {

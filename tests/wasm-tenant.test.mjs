@@ -100,3 +100,23 @@ test('many tiny print calls cannot allocate unbounded stdout chunk slots',async(
     await assert.rejects(guest.on_message(),/E_STDOUT_CHUNKS/);
   }finally{globalThis.fetch=old;}
 });
+
+test('reject valid Wasm exports with the wrong main and actor receiver arity',async()=>{
+  // Parameter counts are part of the compiler/browser v2 guest ABI. Merely
+  // finding a function export is insufficient: malformed guests must not boot.
+  const wrong_main=Buffer.from(
+    '0061736d0100000001060160017f017e03020100070801046d61696e00000a06010400422a0b','hex');
+  const correct_actor=Buffer.from('0061736d0100000001190560017f017f60027f7e006000017e60017f0060037f7e7e00022602046174746f0b6163746f725f737061776e0000046174746f0a6163746f725f73656e6400010304030203040504010101010606017f0141000b073b05046d61696e00020a6163746f725f696e697400030d6163746f725f726563656976650004066d656d6f727902000a70616e69635f636f646503000a19030c00410010004205100142000b02000b070041072400000b00150b6174746f2e6163746f72730107436f756e746572','hex');
+  const wrong_actor=Buffer.from(correct_actor.toString('hex')
+    .replace('011905','011805').replace('60037f7e7e00','60027f7e00'),'hex');
+  assert.equal(WebAssembly.validate(wrong_main),true);
+  assert.equal(WebAssembly.validate(wrong_actor),true);
+  const previous=globalThis.fetch;
+  try {
+    for(const [bytes,reason] of [[wrong_main,/E_WASM_MAIN_SIGNATURE/],
+                                  [wrong_actor,/E_WASM_ACTOR_SIGNATURE/]]) {
+      globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)});
+      await assert.rejects(open_wasm_tenant('https://example.test/wrong-abi.wasm'),reason);
+    }
+  }finally{globalThis.fetch=previous;}
+});
