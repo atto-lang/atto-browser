@@ -78,3 +78,11 @@ const receipt = await client.call(sender);
 ```
 
 `client.call(sender)` only succeeds after the supervisor serially delivers and acknowledges each compiled actor send (maximum 16 messages). A missing, revoked, mismatched or restarted route fails closed and restarts the source tenant; the receiver remains isolated. This is **completion of host-side delivery**, not a `Result` available to individual AttoLang `.send()` expressions. Sends are not transactional: a prior message may have been delivered before a subsequent failure. This profile accepts only little-endian signed `i64` messages, static slots and application-issued route capabilities. Browser-level physical zero-copy and compiler ownership/lifetime verification are not claimed.
+
+### Typed remote-send receipts v1
+
+The supervisor, not guest Wasm, issues monotonic correlation IDs and structured `atto.browser.send-receipt.v1` receipts. `send_route()` returns `result.receipt`; a completed compiled-sender `client.call()` returns `remote_receipts` alongside the original `remote_acks`. Each receipt names the source/destination tenant and generation, route ID, destination actor ID, status, and canonical error code; it **never** includes a capability.
+
+Statuses are **`processed`** (receiver handler returned successfully), **`rejected`** (no delivery dispatched) and **`unknown`** (delivery was dispatched but crashed, timed out or could not be confirmed). This is a **processing acknowledgment**, not exactly-once semantics. Do **not automatically retry `unknown`**—the receiver may have applied the message. Earlier processed messages in a batch remain processed even when a later message fails. On remote-send failure the client rejects with the existing `Error.message` and an additional validated `error.failure = {protocol,code,outcome,receipt,prior_receipts}`. The `prior_receipts` list is bounded to 16.
+
+The current `remote_actor(...).send(...)` guest import still returns `void`, and the compiler still rejects `await`. This feature intentionally stops at **host-visible typed receipts** until proper Wasm continuation frames and a genuine guest-visible `Result<int,string>` can be implemented. Transport buffer ownership, no duplicate acknowledgments, restart fencing and unknown processing outcomes remain separate correctness obligations.
