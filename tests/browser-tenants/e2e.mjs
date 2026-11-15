@@ -80,6 +80,25 @@ const off=client.on_event(event=>{report.events.push(event)});
       'E_ROUTE_INVALID');
 
 
+    // The JS compiler's restricted Counter actor receives the exact same
+    // i64 little-endian messages and produces the same stdout as Wasm.
+    const js_actor=await client.spawn('js_actor',{backend:'js',
+      entry:'/tests/browser-tenants/js-counter.mjs',trusted:true});
+    check((await client.call(js_actor)).actors===1,
+      'JS-transpiled actor initialized in an independent dedicated worker');
+    const js_route=await client.grant_route(alpha,js_actor,{actor_id:1,wire_type:'i64'});
+    const js_msg_40=new ArrayBuffer(8);
+    new DataView(js_msg_40).setBigInt64(0,40n,true);
+    const js_first=await client.send_route(alpha,js_route,js_msg_40,{mode:'take'});
+    const js_msg_2=new ArrayBuffer(8);
+    new DataView(js_msg_2).setBigInt64(0,2n,true);
+    const js_second=await client.send_route(alpha,js_route,js_msg_2,{mode:'take'});
+    check(js_msg_40.byteLength===0 && js_msg_2.byteLength===0 &&
+      js_first.stdout==='40\n' && js_second.stdout==='42\n' &&
+      js_second.receipt?.outcome==='processed',
+      'JS and Wasm actor recipients share checked i64 route wire and ordered receipts');
+    await client.stop(js_actor);
+
     // Source-level AttoLang remote_actor(Counter,1).send(...) is compiled
     // into Wasm; neither message is initiated by JavaScript send_route().
     const compiledReceiver=await client.spawn('compiled_receiver',{backend:'wasm',
@@ -184,7 +203,7 @@ const off=client.on_event(event=>{report.events.push(event)});
     await client.stop(beta);
     check((await client.list()).length===0,'all tenant workers terminated and removed');
     await rejects(client.call(alpha),'E_NO_TENANT');
-    check(report.events.filter(x=>x.event==='tenant_stopped').length===9,
+    check(report.events.filter(x=>x.event==='tenant_stopped').length===10,
       'supervisor confirms each tenant shutdown');
     report.status='ok';
   }catch(error){
