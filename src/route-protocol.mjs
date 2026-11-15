@@ -16,7 +16,7 @@ export function assert_route_capability(value) {
   return value;
 }
 export function assert_route_buffer(buffer,wire_type) {
-  if (!(buffer instanceof ArrayBuffer) || buffer instanceof SharedArrayBuffer)
+  if (!(buffer instanceof ArrayBuffer))
     throw new Error('E_ROUTE_BUFFER');
   if (!buffer.byteLength || buffer.byteLength>MAX_ROUTE_BYTES)
     throw new Error('E_ROUTE_SIZE');
