@@ -157,3 +157,43 @@ test('unbound or malformed compiler guest outbox cannot forge delivery',()=>{
   assert.equal(h.workers[1].messages.length,1,'receiver never saw malformed mail');
   assert.equal(h.workers[0].terminated,true);
 });
+
+test('receiver crash during compiled remote delivery fails sender and fences old route',()=>{
+  const h=fixture(),sender=h.spawn('sender'),receiver=h.spawn('receiver'),
+    neighbor=h.spawn('neighbor');
+  const route=grant(h,sender,receiver);
+  h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  const call=h.send('call',sender);
+  h.workers[0].emit({op:'result',tenant:'sender',generation:sender.generation,
+    id:call,ok:true,result:{value:'0'},remote_sends:[{slot:1,value:40n}]});
+  assert.equal(h.answer(call),undefined);
+  h.workers[1].onerror();
+  assert.equal(h.answer(call).error,'E_REMOTE_DELIVERY: E_WORKER_CRASH');
+  assert.equal(h.workers[0].terminated,true);
+  assert.equal(h.workers[1].terminated,true);
+  assert.equal(h.workers[2].terminated,false,'unrelated tenant survives both failures');
+  const stale=h.send('send_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,wire_type:'i64',buffer:new ArrayBuffer(8)});
+  assert.equal(h.answer(stale).error,'E_STALE_TENANT_HANDLE');
+  const alive=h.send('call',neighbor);
+  h.workers[2].emit({op:'result',tenant:'neighbor',generation:neighbor.generation,
+    id:alive,ok:true,result:{value:'7'}});
+  assert.equal(h.answer(alive).result.value,'7');
+});
+test('compiled route slots cannot be rebound or forged with stale route authority',()=>{
+  const h=fixture(),sender=h.spawn('sender'),receiver=h.spawn('receiver');
+  const route=grant(h,sender,receiver);
+  let id=h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:'00000000-0000-4000-8000-000000000000',slot:1});
+  assert.equal(h.answer(id).error,'E_ROUTE_INVALID');
+  id=h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,slot:17});
+  assert.equal(h.answer(id).error,'E_ROUTE_SLOT');
+  id=h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  assert.equal(h.answer(id).result.bound,true);
+  id=h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  assert.equal(h.answer(id).error,'E_ROUTE_SLOT_IN_USE');
+});
