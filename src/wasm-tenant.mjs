@@ -62,6 +62,7 @@ export async function open_wasm_tenant(entry) {
   // Tracks the instance whose current guest entrypoint failed. A panic in an
   // actor must not be misreported using the main instance's panic_code.
   let active_guest=null;
+  let active_actor=null; // null means the main entrypoint, not an actor
 
   function instantiate() {
     let instance;
@@ -88,16 +89,17 @@ export async function open_wasm_tenant(entry) {
         // Reserve before running any guest init to prevent recursive spawn
         // from bypassing the actor limit.
         const id=next_actor_id++;
-        const actor={type,instance:null,mailbox:[],sequence:0n};
+        const actor={id,type,parent_id:active_actor?.id ?? 0,instance:null,mailbox:[],sequence:0n};
         actors.set(id,actor);
         try {
           actor.instance=instantiate();
-          const caller=active_guest;
+          const caller=active_guest, parent_actor=active_actor;
           active_guest=actor.instance;
+          active_actor=actor;
           actor.instance.exports.actor_init(type);
-          // Restore the caller only on normal return. A trap retains the
-          // failing actor so panic_code comes from the correct Wasm instance.
+          // A trap retains the failing actor's identity and panic code.
           active_guest=caller;
+          active_actor=parent_actor;
           return id;
         } catch (e) { actors.delete(id); throw e; }
       },
@@ -121,6 +123,7 @@ export async function open_wasm_tenant(entry) {
       let value;
       try {
         active_guest=main;
+        active_actor=null;
         value=main.exports.main();
         if (typeof value!=='bigint') throw new Error('E_GUEST_SIGNATURE');
         let cursor=0, steps=0;
@@ -130,7 +133,10 @@ export async function open_wasm_tenant(entry) {
           if(!actor || !actor.instance)throw new Error('E_ACTOR_REF');
           const payload=actor.mailbox.shift();
           active_guest=actor.instance;
+          active_actor=actor;
           actor.instance.exports.actor_receive(actor.type,payload,++actor.sequence);
+          active_guest=main;
+          active_actor=null;
           // Release processed admission slots before more messages arrive.
           // Keep a separate total-step limit to stop self-mailbox loops.
           if(cursor>=1024) { queued.splice(0,cursor);cursor=0; }
@@ -138,7 +144,19 @@ export async function open_wasm_tenant(entry) {
         queued.length=0;
       }catch(e){
         const code=active_guest?.exports.panic_code?.value;
-        throw new Error(code ? `E_GUEST_PANIC_${code}` : 'E_GUEST_TRAP: '+String(e?.message||e));
+        const failure=new Error(code ? `E_GUEST_PANIC_${code}` : 'E_GUEST_TRAP: '+String(e?.message||e));
+        if (active_actor) {
+          // Only the trusted Wasm host constructs this notice. Guest Wasm
+          // cannot directly emit CONTROL messages or choose actor metadata.
+          failure.actor_failure={
+            kind:'panic',
+            actor_id:active_actor.id,
+            parent_id:active_actor.parent_id,
+            actor_type:types[active_actor.type],
+            reason:failure.message.slice(0,256),
+          };
+        }
+        throw failure;
       }
       return {value:String(value),stdout:stdout_chunks.join(''),actors:actors.size};
     },
