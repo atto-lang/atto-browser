@@ -43,7 +43,7 @@ export class TenantSupervisor {
     if (msg.backend === 'js' && msg.trusted !== true) throw new Error('E_JS_REQUIRES_TRUST');
     const entry = assert_entry_url(msg.entry, this.origin);
     const state = {id:msg.tenant,backend:msg.backend,entry,trusted:msg.trusted === true,
-                   generation:0,capability:null,restarts:0,worker:null,
+                   generation:0,capability:null,worker_instance:null,restarts:0,worker:null,
                    pending:null,boot_request:msg.id,ready:false,timer:null};
     this.tenants.set(state.id,state);
     this.#start(state);
@@ -61,6 +61,7 @@ export class TenantSupervisor {
     try { worker = this.create_worker(); }
     catch (e) { this.#retire(state,'E_WORKER_CREATE: '+error_text(e),true); return; }
     state.worker = worker;
+    state.worker_instance=null;
     state.ready = false;
     worker.onmessage = ({data}) => this.#worker_message(state,generation,data);
     worker.onerror = () => this.#failure(state,generation,'E_WORKER_CRASH');
@@ -72,13 +73,41 @@ export class TenantSupervisor {
   #worker_message(state,generation,data) {
     if (this.tenants.get(state.id)!==state || generation!==state.generation || data?.protocol!==PROTOCOL || data.generation!==generation) return;
     if (data.op==='ready' && !state.ready) {
+      if(data.worker_instance!==undefined) {
+        if(typeof data.worker_instance!=='string' ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.worker_instance)) {
+          this.#failure(state,generation,'E_WORKER_ID');return;
+        }
+        state.worker_instance=data.worker_instance;
+      }
       clearTimeout(state.timer); state.timer=null;
       state.ready=true;
       if (state.boot_request!==null) {
-        this.#reply(state.boot_request,true,{tenant:state.id,generation,capability:state.capability});
+        this.#reply(state.boot_request,true,{tenant:state.id,generation,capability:state.capability,
+          ...(state.worker_instance ? {worker_instance:state.worker_instance} : {})});
         state.boot_request=null;
       }
       this.#event('tenant_ready',state.id,generation,undefined,state.capability);
+      return;
+    }
+    if (data.op==='control' && state.ready && state.pending && data.id===state.pending.id) {
+      const notice=data.control;
+      if(state.backend!=='wasm' || data.tenant!==state.id ||
+          notice?.kind!=='panic' || !Number.isSafeInteger(notice.actor_id) ||
+          notice.actor_id<1 || notice.actor_id>64 ||
+          !Number.isSafeInteger(notice.parent_id) ||
+          notice.parent_id<0 || notice.parent_id>64 ||
+          typeof notice.actor_type!=='string' || notice.actor_type.length<1 ||
+          notice.actor_type.length>256 || typeof notice.reason!=='string' ||
+          notice.reason.length>256 || !notice.reason.startsWith('E_GUEST_')) {
+        this.#failure(state,generation,'E_CONTROL_PROTOCOL');return;
+      }
+      if(!state.control_sent) {
+        state.control_sent=true;
+        this.event({protocol:PROTOCOL,event:'actor_panic',priority:'CONTROL',
+          tenant:state.id,generation,actor_id:notice.actor_id,parent_id:notice.parent_id,
+          actor_type:notice.actor_type,reason:notice.reason});
+      }
       return;
     }
     if (data.op==='result' && state.ready && state.pending && data.id===state.pending.id) {
@@ -106,6 +135,7 @@ export class TenantSupervisor {
     if (!state.ready) throw new Error('E_TENANT_NOT_READY');
     if (state.pending) throw new Error('E_TENANT_BUSY');
     state.pending = { id:msg.id };
+    state.control_sent=false;
     state.timer = setTimeout(()=>this.#failure(state,state.generation,'E_CALL_TIMEOUT'),this.call_timeout_ms);
     try { state.worker.postMessage({protocol:PROTOCOL,op:'call',id:msg.id,generation:state.generation,tenant:state.id}); }
     catch(e) {this.#failure(state,state.generation,'E_CALL_POST: '+error_text(e));}
