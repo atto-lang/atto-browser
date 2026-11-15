@@ -100,3 +100,60 @@ test('same-tenant grants, unsupported wire and too many grants are rejected',()=
   id=h.send('grant_route',{...a,target:b,actor_id:1,wire_type:'i64'});
   assert.equal(h.answer(id).error,'E_ROUTE_LIMIT');
 });
+
+test('compiled ActorRef.send emits ordered opaque route mail; caller waits for both acks',()=>{
+  const h=fixture(),sender=h.spawn('sender'),receiver=h.spawn('receiver');
+  const route=grant(h,sender,receiver);
+  const bound=h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  assert.deepEqual(h.answer(bound).result,{slot:1,bound:true});
+  const binding=h.workers[0].messages.at(-1);
+  assert.equal(binding.op,'bind_route');
+  assert.equal(binding.slot,1);
+  assert.equal(binding.route_capability,undefined,'capability remains in supervisor');
+  assert.equal(binding.route_id,undefined,'opaque route ID remains in supervisor');
+  const call=h.send('call',sender);
+  h.workers[0].emit({op:'result',tenant:'sender',generation:sender.generation,
+    id:call,ok:true,result:{value:'0',actors:1,stdout:''},
+    remote_sends:[{slot:1,value:40n},{slot:1,value:2n}]});
+  assert.equal(h.answer(call),undefined,'call must not ack before recipient settles');
+  let mail=h.workers[1].messages.at(-1);
+  assert.equal(mail.op,'route');
+  assert.equal(new DataView(mail.buffer).getBigInt64(0,true),40n);
+  h.workers[1].emit({op:'route_result',tenant:'receiver',generation:receiver.generation,
+    id:mail.id,route_id:route.route_id,ok:true,
+    result:{value:'delivered',stdout:'40\n',actors:1}});
+  assert.equal(h.answer(call),undefined,'first ack is not a batch completion');
+  mail=h.workers[1].messages.at(-1);
+  assert.equal(new DataView(mail.buffer).getBigInt64(0,true),2n);
+  h.workers[1].emit({op:'route_result',tenant:'receiver',generation:receiver.generation,
+    id:mail.id,route_id:route.route_id,ok:true,
+    result:{value:'delivered',stdout:'42\n',actors:1}});
+  const reply=h.answer(call);
+  assert.equal(reply.ok,true);
+  assert.deepEqual(reply.result.remote_acks.map(x=>x.stdout),['40\n','42\n']);
+  assert.equal(h.supervisor.active_route_sends,0);
+});
+test('revocation fences compiled sends even with a previously bound slot',()=>{
+  const h=fixture(),sender=h.spawn('sender'),receiver=h.spawn('receiver');
+  const route=grant(h,sender,receiver);
+  h.send('bind_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,slot:1});
+  h.send('revoke_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability});
+  const id=h.send('call',sender);
+  h.workers[0].emit({op:'result',tenant:'sender',generation:sender.generation,
+    id,ok:true,result:{value:'0'},remote_sends:[{slot:1,value:42n}]});
+  assert.equal(h.answer(id).error,'E_REMOTE_ROUTE_STALE');
+  assert.equal(h.workers[0].terminated,true);
+  assert.equal(h.workers[1].terminated,false);
+});
+test('unbound or malformed compiler guest outbox cannot forge delivery',()=>{
+  const h=fixture(),sender=h.spawn('sender'),receiver=h.spawn('receiver');
+  const id=h.send('call',sender);
+  h.workers[0].emit({op:'result',tenant:'sender',generation:sender.generation,
+    id,ok:true,result:{value:'0'},remote_sends:[{slot:17,value:42n}]});
+  assert.equal(h.answer(id).error,'E_REMOTE_PROTOCOL');
+  assert.equal(h.workers[1].messages.length,1,'receiver never saw malformed mail');
+  assert.equal(h.workers[0].terminated,true);
+});
