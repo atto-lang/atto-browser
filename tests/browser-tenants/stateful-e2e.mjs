@@ -1,5 +1,6 @@
 import {BrowserTenantClient} from '/src/client.mjs';
 const {sha256}=await import('/fixtures/stateful-pin.mjs');
+const {hungSha}=await import('/fixtures/stateful-noncooperating-pin.mjs');
 const client=new BrowserTenantClient();
 const report={status:'running',steps:[],events:[]};
 window.__statefulReport=report;
@@ -67,6 +68,23 @@ try{
   await rejects(client.call_receiver(alpha,'increment',1n),'E_STALE_TENANT_HANDLE');
   check((await client.call_receiver(replacement,'increment',1n)).value==='18',
     'fresh generation starts at declared state initializer 17');
+  const hung=await client.spawn('counter_hung',{
+    ...opts,entry:'/fixtures/stateful-noncooperating.wasm',sha256:hungSha});
+  await rejects(client.call_receiver(hung,'increment',1n),'E_CALL_TIMEOUT');
+  const hungDown=await until(()=>report.events.find(e=>e.event==='tenant_down' &&
+    e.tenant==='counter_hung'&&e.generation===hung.generation),'noncooperative worker down');
+  check(hungDown.reason==='E_CALL_TIMEOUT',
+    'real noncooperating worker terminated by supervisor watchdog');
+  check((await client.call_receiver(sibling,'increment',1n)).value==='20',
+    'watchdog worker termination cannot block healthy sibling');
+  const hungReady=await until(()=>report.events.find(e=>e.event==='tenant_ready'&&
+    e.tenant==='counter_hung'&&e.generation>hung.generation),'hung worker restart');
+  const hungReplacement={tenant:hungReady.tenant,generation:hungReady.generation,
+    capability:hungReady.capability};
+  await rejects(client.call_receiver(hung,'increment',1n),'E_STALE_TENANT_HANDLE');
+  check(hungReplacement.capability!==hung.capability,
+    'hard watchdog restart rotates stateful authority');
+  await client.stop(hungReplacement);
   await client.stop(replacement);await client.stop(sibling);
   check((await client.list()).length===0,'no worker generations leaked after stop');
   report.status='ok';
