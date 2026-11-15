@@ -6,9 +6,9 @@ The browser host starts **one dedicated supervisor Web Worker**; the supervisor 
 import { BrowserTenantClient } from './src/client.mjs';
 const app = new BrowserTenantClient();
 app.on_event(event => console.log(event));
-await app.spawn('tenant_a', {backend:'wasm', entry:'/guest.wasm'});
-const result = await app.call('tenant_a'); // calls guest main(), once per incarnation
-await app.stop('tenant_a');
+const handle = await app.spawn('tenant_a', {backend:'wasm', entry:'/guest.wasm'});
+const result = await app.call(handle); // calls guest main(), once per incarnation
+await app.stop(handle);
 app.close();
 ```
 
@@ -21,3 +21,11 @@ app.close();
 **Service Worker:** intentionally not the live supervisor because browsers may suspend/terminate Service Workers when idle. An optional Service Worker can implement offline cache, update events, and durable notifications, but cannot be relied upon to keep actor supervision alive.
 
 Run host-unit tests: `npm test` (Node 20+). Browser end-to-end and compiled Atto guest conformance tests remain required before claiming production readiness.
+
+### Incarnation-bound handles
+
+The supervisor issues `{tenant,generation,capability}` when a tenant becomes ready. `call(handle)` and `stop(handle)` require that exact handle; a tenant name is not enough. A restart invalidates the old handle. Subscribe to `on_event` and use the new `tenant_ready` event's `tenant`, `generation`, and `capability` for subsequent requests. Random capability values defend against accidental/stale references *within the application's trusted origin*, not hostile JavaScript already executing in that same origin.
+
+### Bounded Wasm policy
+
+The v1 Wasm loader requires fixed non-growing linear memory (at most 16 Wasm pages = 1 MiB per instance), no Wasm tables, an allowed `atto` function import set, and a consistent compiler-produced `atto.actors` custom section. A tenant can instantiate up to 64 actor instances. CPU watchdog protection applies at the worker level, not individual actor execution; worker termination reclaims all tenant actors.
