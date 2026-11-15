@@ -1,4 +1,5 @@
-import { PROTOCOL, MAX_TENANTS, assert_entry_url, assert_request, error_text, normalize_guest_result } from './protocol.mjs';
+import { PROTOCOL, MAX_TENANTS, assert_entry_url, assert_request, error_text,
+  normalize_guest_result, normalize_receiver_result, assert_receiver_identifier } from './protocol.mjs';
 import { MAX_ROUTES, MAX_ROUTE_INFLIGHT, assert_route_id, assert_route_capability,
   assert_route_buffer, assert_route_target } from './route-protocol.mjs';
 import {create_send_receipt,create_send_failure} from './send-receipt.mjs';
@@ -70,10 +71,11 @@ export class TenantSupervisor {
     if (this.tenants.has(msg.tenant)) throw new Error('E_TENANT_EXISTS');
     if (this.tenants.size >= MAX_TENANTS) throw new Error('E_TENANT_LIMIT');
     if (!['wasm', 'js', 'receiver'].includes(msg.backend)) throw new Error('E_BACKEND');
-    if(msg.backend==='receiver' && (
-      typeof msg.owner!=='string' || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(msg.owner) ||
-      typeof msg.sha256!=='string' || !/^[0-9a-f]{64}$/.test(msg.sha256)))
-      throw new Error('E_RECEIVER_ADMISSION');
+    if(msg.backend==='receiver') {
+      assert_receiver_identifier(msg.owner,'E_RECEIVER_ADMISSION');
+      if(typeof msg.sha256!=='string' || !/^[0-9a-f]{64}$/.test(msg.sha256))
+        throw new Error('E_RECEIVER_ADMISSION');
+    }
     // JS is same-origin code with origin capabilities, NOT an untrusted sandbox.
     if (msg.backend === 'js' && msg.trusted !== true) throw new Error('E_JS_REQUIRES_TRUST');
     const entry = assert_entry_url(msg.entry, this.origin);
@@ -139,7 +141,12 @@ export class TenantSupervisor {
           notice.parent_id<0 || notice.parent_id>64 ||
           typeof notice.actor_type!=='string' || notice.actor_type.length<1 ||
           notice.actor_type.length>256 || typeof notice.reason!=='string' ||
-          notice.reason.length>256 || !notice.reason.startsWith('E_GUEST_')) {
+          notice.reason.length>256 || !notice.reason.startsWith('E_GUEST_') ||
+          (state.backend==='receiver' && (
+            state.pending.kind!=='receiver' ||
+            notice.actor_id!==1 || notice.parent_id!==0 ||
+            notice.actor_type!==state.owner ||
+            !/^E_GUEST_(?:PANIC_[1-9][0-9]{0,9}|TRAP)$/.test(notice.reason)))) {
         this.#failure(state,generation,'E_CONTROL_PROTOCOL');return;
       }
       if(!state.control_sent) {
@@ -231,18 +238,32 @@ export class TenantSupervisor {
         this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
       }
       if(data.ok) {
+        if(state.control_sent) {
+          this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
+        }
         let result;
-        try {result=normalize_guest_result(data.result)}catch{
+        try {result=normalize_receiver_result(data.result)}catch{
           this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
         }
         clearTimeout(state.timer);state.timer=null;state.pending=null;
         this.#reply(data.id,true,{tenant:state.id,generation,...result});
       }else if(data.error==='E_RECEIVER_METHOD' ||
                data.error==='E_RECEIVER_ARGS' || data.error==='E_RECEIVER_CLOSED') {
+        if(state.control_sent) {
+          this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
+        }
         // The guest wasn't executed: recoverable pre-dispatch rejection.
         clearTimeout(state.timer);state.timer=null;state.pending=null;
         this.#reply(data.id,false,undefined,data.error);
       }else{
+        // A real guest trap must have been reported on the priority CONTROL
+        // lane by the same worker before its failure reply. An unpaired panic
+        // string must not be promoted to an authenticated panic notification.
+        if(typeof data.error==='string' &&
+           /^E_GUEST_(?:PANIC_[1-9][0-9]{0,9}|TRAP)$/.test(data.error) &&
+           !state.control_sent) {
+          this.#failure(state,generation,'E_CONTROL_MISSING');return;
+        }
         this.#failure(state,generation,
           typeof data.error==='string' ? data.error.slice(0,256):'E_RECEIVER_FAILED');
       }
@@ -306,8 +327,7 @@ export class TenantSupervisor {
     if(state.backend!=='receiver')throw new Error('E_RECEIVER_BACKEND');
     if(!state.ready)throw new Error('E_TENANT_NOT_READY');
     if(state.pending)throw new Error('E_TENANT_BUSY');
-    if(typeof msg.method!=='string' || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(msg.method))
-      throw new Error('E_RECEIVER_METHOD');
+    assert_receiver_identifier(msg.method,'E_RECEIVER_METHOD');
     if(!Array.isArray(msg.args) || msg.args.length>8 ||
         msg.args.some(x=>typeof x!=='bigint' ||
           x<-(1n<<63n) || x>(1n<<63n)-1n))
