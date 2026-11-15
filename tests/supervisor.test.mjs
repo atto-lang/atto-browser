@@ -146,3 +146,22 @@ test('malformed CONTROL notices fail closed and never become supervisor events',
   assert.equal(h.events.some(e=>e.event==='actor_panic'),false);
   assert.equal(h.workers[0].terminated,true);
 });
+
+test('foreign tenant ready reply fails closed, never grants a capability',()=>{
+  const h=mk();const requested=spawn(h);
+  h.workers[0].respond({op:'ready',tenant:'tenant_b',generation:1});
+  assert.equal(h.replies.find(x=>x.id===requested),undefined);
+  assert.equal(h.workers[0].terminated,true);
+  assert.equal(h.events.some(x=>x.event==='tenant_ready'),false);
+  ready(h.workers[1]);
+  assert.equal(h.replies.find(x=>x.id===requested).result.tenant,'t1');
+});
+test('boot failure reason is bounded and rejected worker is terminated',()=>{
+  const h=mk();const requested=spawn(h);
+  h.workers[0].respond({op:'boot_failed',tenant:'t1',generation:1,error:'E_BOOT_'+('x'.repeat(2000))});
+  assert.equal(h.workers[0].terminated,true);
+  const down=h.events.find(x=>x.event==='tenant_down');
+  assert.equal(down.reason.length,512);
+  ready(h.workers[1]);
+  assert.ok(h.replies.find(x=>x.id===requested)?.ok);
+});
