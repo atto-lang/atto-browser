@@ -98,3 +98,47 @@ The current `remote_actor(...).send(...)` guest import still returns `void`, and
 AttoLang is the public name; preserve existing Oreslang/.ores compatibility and use canonical .atto for new portable library source. This README defines scope, not feature readiness.
 
 **Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Experimental compiled receiver tenant workers (stacked on atto-source.rs #144)
+
+The new `backend:'receiver'` path executes **only** an opt-in scalar
+`attoc --receiver-instance-preview` Wasm module. It does not activate the
+production `mtd` compiler or actor-state leases.
+
+Build a receiver Wasm fixture using the exact Rust compiler tree:
+
+```sh
+attoc --receiver-instance-preview tests/fixtures/receiver-worker.atto -o receiver-worker.wasm
+sha256sum receiver-worker.wasm
+```
+
+Pass the resulting **build-pinned** 64-character SHA-256 in the app-authorized
+`spawn` request, not a checksum calculated from a remote untrusted download:
+
+```js
+const actor=await client.spawn('my_tenant',{
+  backend:'receiver',
+  entry:'/guests/receiver-worker.wasm',
+  owner:'Worker',
+  sha256:RELEASE_MANIFEST_SHA256
+});
+const answer=await client.call_receiver(actor,'double',21n); // answer.value === '42'
+```
+
+The supervisor authorizes calls using its existing tenant capability and
+monotonic generation, before forwarding a bounded method name and signed i64
+arguments. Only the **tenant worker** receives and holds the Wasm receiver
+binding token. Wrong-method attempts are rejected before guest execution.
+Checked guest overflow emits a typed CONTROL notice before the tenant is
+retired/restarted, fencing old handles. Healthy siblings survive.
+
+Each tenant worker contains **one** receiver actor Wasm instance in this
+milestone. The adapter does not offer arbitrary program entry, mailbox
+routing, actor-state mutation or an actor-owned heap. `on_control` events are
+the existing browser supervisor's logical priority envelope, not a physical
+hard-real-time priority lane. A trusted application must supply the tenant
+authority and pinned artifact digest. Same-origin workers do not sandbox
+hostile same-origin JavaScript. State/lease-bearing `mtd` stays rejected.
+
+For executed real Chromium coverage:
+`ATTO_BROWSER_FIXTURE_DIR=/path/to/compiled/guests npm run test:browser-receiver`.
