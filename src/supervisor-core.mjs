@@ -15,7 +15,7 @@ export class TenantSupervisor {
     this.call_timeout_ms = call_timeout_ms;
     this.restart_limit = restart_limit;
     this.tenants = new Map();
-    this.epochs = new Map(); // bounded replay metadata, independent of live worker identity
+    this.next_generation = 0; // monotonic supervisor-wide; never reissue incarnation
   }
   handle(raw) {
     let msg;
@@ -31,7 +31,10 @@ export class TenantSupervisor {
     } catch (e) { this.#reply(msg.id, false, undefined, error_text(e)); }
   }
   #reply(id, ok, result, error) { this.reply({ protocol: PROTOCOL, id, ok, ...(ok ? { result } : { error }) }); }
-  #event(name, tenant, generation, reason) { this.event({ protocol: PROTOCOL, event: name, tenant, generation, ...(reason ? { reason } : {}) }); }
+  #event(name, tenant, generation, reason, capability) {
+    this.event({ protocol: PROTOCOL, event: name, tenant, generation,
+      ...(reason ? { reason } : {}), ...(capability ? { capability } : {}) });
+  }
   #spawn(msg) {
     if (this.tenants.has(msg.tenant)) throw new Error('E_TENANT_EXISTS');
     if (this.tenants.size >= MAX_TENANTS) throw new Error('E_TENANT_LIMIT');
@@ -40,17 +43,19 @@ export class TenantSupervisor {
     if (msg.backend === 'js' && msg.trusted !== true) throw new Error('E_JS_REQUIRES_TRUST');
     const entry = assert_entry_url(msg.entry, this.origin);
     const state = {id:msg.tenant,backend:msg.backend,entry,trusted:msg.trusted === true,
-                   generation:this.epochs.get(msg.tenant) || 0,restarts:0,worker:null,
+                   generation:0,capability:null,restarts:0,worker:null,
                    pending:null,boot_request:msg.id,ready:false,timer:null};
     this.tenants.set(state.id,state);
     this.#start(state);
   }
   #start(state) {
-    state.generation++;
-    if (!this.epochs.has(state.id) && this.epochs.size>=1024)
-      this.epochs.delete(this.epochs.keys().next().value);
-    this.epochs.delete(state.id);
-    this.epochs.set(state.id,state.generation);
+    if (this.next_generation>=Number.MAX_SAFE_INTEGER) {
+      this.#retire(state,'E_GENERATION_EXHAUSTED',true); return;
+    }
+    state.generation=++this.next_generation;
+    // The token is never sent into the tenant worker. It is replaced on each
+    // restart, and old handles are permanently invalid.
+    state.capability=crypto.randomUUID();
     const generation = state.generation;
     let worker;
     try { worker = this.create_worker(); }
@@ -69,8 +74,11 @@ export class TenantSupervisor {
     if (data.op==='ready' && !state.ready) {
       clearTimeout(state.timer); state.timer=null;
       state.ready=true;
-      if (state.boot_request!==null) { this.#reply(state.boot_request,true,{tenant:state.id,generation}); state.boot_request=null; }
-      this.#event('tenant_ready',state.id,generation);
+      if (state.boot_request!==null) {
+        this.#reply(state.boot_request,true,{tenant:state.id,generation,capability:state.capability});
+        state.boot_request=null;
+      }
+      this.#event('tenant_ready',state.id,generation,undefined,state.capability);
       return;
     }
     if (data.op==='result' && state.ready && state.pending && data.id===state.pending.id) {
@@ -86,9 +94,15 @@ export class TenantSupervisor {
     }
     if (data.op==='boot_failed' && !state.ready) this.#failure(state,generation,data.error || 'E_BOOT_FAILED');
   }
+  #authorize(msg,state) {
+    if (!Number.isSafeInteger(msg.generation) || msg.generation!==state.generation ||
+        typeof msg.capability!=='string' || msg.capability!==state.capability)
+      throw new Error('E_STALE_TENANT_HANDLE');
+  }
   #call(msg) {
     const state=this.tenants.get(msg.tenant);
     if (!state) throw new Error('E_NO_TENANT');
+    this.#authorize(msg,state);
     if (!state.ready) throw new Error('E_TENANT_NOT_READY');
     if (state.pending) throw new Error('E_TENANT_BUSY');
     state.pending = { id:msg.id };
@@ -99,6 +113,7 @@ export class TenantSupervisor {
   #stop(msg) {
     const state=this.tenants.get(msg.tenant);
     if (!state) throw new Error('E_NO_TENANT');
+    this.#authorize(msg,state);
     this.#retire(state,'E_STOPPED',false);
     this.#reply(msg.id,true,{tenant:msg.tenant});
   }
