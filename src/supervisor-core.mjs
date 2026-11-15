@@ -129,11 +129,18 @@ export class TenantSupervisor {
       clearTimeout(state.timer);state.timer=null;state.pending=null;
       this.active_route_sends--;
       if(data.ok) {
-        try {normalize_guest_result(data.result)}
-        catch {
+        let ack;
+        try {
+          ack=normalize_guest_result(data.result);
+          if(new TextEncoder().encode(ack.stdout).byteLength>4096)
+            throw new Error('E_REMOTE_ACK_SIZE');
+        }catch {
           this.#failure(pending.source,pending.source_generation,'E_REMOTE_RESULT');
           this.#failure(state,generation,'E_REMOTE_RESULT');return;
         }
+        const source_call=pending.source.pending;
+        if(source_call?.kind==='call_remote')
+          source_call.acks.push({route_id:pending.route_id,value:ack.value,stdout:ack.stdout});
         this.#deliver_guest_next(pending.source);
       } else {
         const reason=typeof data.error==='string' ? data.error.slice(0,256) : 'E_REMOTE_GUEST';
@@ -188,7 +195,7 @@ export class TenantSupervisor {
         } else {
           // Completion ack is delayed until every remote receive returns.
           // This is a host-level batch ack, not yet a per-send Result<T,E>.
-          state.pending={kind:'call_remote',id,messages,index:0,
+          state.pending={kind:'call_remote',id,messages,index:0,acks:[],
             result:{tenant:state.id,generation,...result}};
           this.#deliver_guest_next(state);
         }
@@ -310,7 +317,7 @@ export class TenantSupervisor {
     if(state.index===state.messages.length) {
       clearTimeout(source.timer);source.timer=null;
       source.pending=null;
-      this.#reply(state.id,true,state.result);
+      this.#reply(state.id,true,{...state.result,remote_acks:state.acks});
       return;
     }
     const message=state.messages[state.index];
