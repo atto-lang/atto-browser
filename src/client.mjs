@@ -6,11 +6,19 @@ export class BrowserTenantClient {
   #pending = new Map();
   #listeners = new Set();
   #closed = false;
+  static MAX_PENDING = 128;
   constructor(worker_url = new URL('./supervisor.worker.mjs', import.meta.url), WorkerCtor = Worker) {
     this.#worker = new WorkerCtor(worker_url, { type: 'module' });
     this.#worker.onmessage = ({ data }) => {
       if (!data || data.protocol !== PROTOCOL) return;
-      if (data.event) { for (const callback of this.#listeners) callback(data); return; }
+      if (data.event) {
+        for (const callback of this.#listeners) {
+          // A user callback must never interrupt protocol reply handling or
+          // prevent another subscriber from observing a CONTROL notice.
+          try {callback(data)} catch(error) {console.error('E_TENANT_EVENT_LISTENER',error)}
+        }
+        return;
+      }
       const entry = this.#pending.get(data.id);
       if (!entry) return;
       this.#pending.delete(data.id);
@@ -28,6 +36,12 @@ export class BrowserTenantClient {
   }
   #request(op, data = {}) {
     if (this.#closed) return Promise.reject(new Error('E_CLIENT_CLOSED'));
+    if (this.#pending.size>=BrowserTenantClient.MAX_PENDING)
+      return Promise.reject(new Error('E_CLIENT_PENDING_LIMIT'));
+    if (!Number.isSafeInteger(this.#next) || this.#next>=Number.MAX_SAFE_INTEGER) {
+      this.#abort('E_REQUEST_ID_EXHAUSTED');
+      return Promise.reject(new Error('E_REQUEST_ID_EXHAUSTED'));
+    }
     const id = this.#next++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
