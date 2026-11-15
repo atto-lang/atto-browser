@@ -3,6 +3,7 @@ import {BrowserTenantClient} from '/src/client.mjs';
 // Pin is supplied from the test harness build manifest, not calculated by the
 // untrusted guest download. Real deployments must pin SHA at build/release.
 const {sha256}=await import('/fixtures/receiver-pin.mjs');
+const {extraSha}=await import('/fixtures/receiver-extra-pin.mjs');
 const client=new BrowserTenantClient();
 const report={status:'running',steps:[],events:[]};
 window.__receiverReport=report;
@@ -23,6 +24,14 @@ async function wait_for(fn,name) {
       'E_RECEIVER_DIGEST_MISMATCH');
     check(!(await client.list()).some(x=>x.tenant==='bad_pin'),
       'SHA mismatch cannot reach ready actor worker');
+    await rejects(client.spawn('bad_export',{backend:'receiver',
+      entry:'/fixtures/receiver-extra.wasm',owner:'Worker',sha256:extraSha}),
+      'E_RECEIVER_ABI');
+    check(!(await client.list()).some(x=>x.tenant==='bad_export'),
+      'correctly pinned but unexpected Wasm export cannot bind receiver');
+    await rejects(client.spawn('bad_owner',{backend:'receiver',
+      entry:'/fixtures/receiver-worker.wasm',owner:'x'.repeat(257),sha256}),
+      'E_RECEIVER_ADMISSION');
     const alpha=await client.spawn('rx_alpha',{backend:'receiver',
       entry:'/fixtures/receiver-worker.wasm',owner:'Worker',sha256});
     const sibling=await client.spawn('rx_sibling',{backend:'receiver',
@@ -36,6 +45,7 @@ async function wait_for(fn,name) {
       'compiled multiple-argument receiver dispatch runs');
     await rejects(client.call_receiver(alpha,'triple',21n),'E_RECEIVER_METHOD');
     await rejects(client.call_receiver(alpha,'double',21),'E_RECEIVER_ARGS');
+    await rejects(client.call_receiver(alpha,'x'.repeat(257),21n),'E_RECEIVER_METHOD');
     await rejects(client.call(alpha),'E_RECEIVER_OP');
     check((await client.call_receiver(alpha,'double',1n)).value==='2',
       'invalid method/call arguments are nonfatal pre-dispatch errors');
