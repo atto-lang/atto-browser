@@ -17,8 +17,10 @@ assert.equal(WebAssembly.validate(hung_guest),true);
 const files=new Map([
   ['/index.html',[new URL('./browser-tenants/index.html',import.meta.url),'text/html; charset=utf-8']],
   ['/tests/browser-tenants/e2e.mjs',[new URL('./browser-tenants/e2e.mjs',import.meta.url),'text/javascript; charset=utf-8']],
+  ['/tests/browser-tenants/byte-receiver.mjs',
+    [new URL('./browser-tenants/byte-receiver.mjs',import.meta.url),'text/javascript; charset=utf-8']],
   ...['client','protocol','supervisor-core','supervisor.worker','tenant.worker',
-      'wasm-profile','wasm-tenant'].map(name=>
+      'wasm-profile','wasm-tenant','route-protocol'].map(name=>
     ['/src/'+name+'.mjs',[new URL('../src/'+name+'.mjs',import.meta.url),'text/javascript; charset=utf-8']]),
   ...['two-actors','actor-state','actor-overflow'].map(name=>
     ['/fixtures/'+name+'.wasm',[new URL('file://'+join(fixtures,name+'.wasm')),'application/wasm']]),
@@ -97,7 +99,7 @@ try {
   },'compiled Atto actor tenant E2E');
   if(result.status!=='ok')throw new Error('Browser tenant E2E failed: '+result.error+
     '\ncompleted: '+JSON.stringify(result.steps)+'\nevents: '+JSON.stringify(result.events));
-  assert.ok(result.steps.length>=22,'all browser milestones must execute');
+  assert.ok(result.steps.length>=32,'all browser milestones must execute');
   assert.ok(requests.some(x=>x.path==='/fixtures/actor-overflow.wasm'),'real actor guest downloaded');
   assert.ok(requests.every(x=>x.method==='GET'),'no source upload or server compilation');
   console.log('PASS real Chromium module Web Workers: '+result.steps.length+' integration assertions');
