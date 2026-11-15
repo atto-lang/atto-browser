@@ -1,10 +1,12 @@
-import { PROTOCOL, MAX_TENANTS, assert_entry_url, assert_request, error_text } from './protocol.mjs';
+import { PROTOCOL, MAX_TENANTS, assert_entry_url, assert_request, error_text, normalize_guest_result } from './protocol.mjs';
 
 // Run in a dedicated Web Worker. Service Workers can be terminated by browsers.
 export class TenantSupervisor {
   constructor({ create_worker, reply, event = () => {}, origin, boot_timeout_ms = 3000,
                 call_timeout_ms = 3000, restart_limit = 1 }) {
     if (typeof create_worker !== 'function' || typeof reply !== 'function') throw new TypeError('worker and reply required');
+    if (![boot_timeout_ms,call_timeout_ms].every(x=>Number.isSafeInteger(x) && x>=1 && x<=60000) ||
+        !Number.isSafeInteger(restart_limit) || restart_limit<0 || restart_limit>3) throw new Error('E_SUPERVISOR_OPTIONS');
     this.create_worker = create_worker;
     this.reply = reply;
     this.event = event;
@@ -13,7 +15,7 @@ export class TenantSupervisor {
     this.call_timeout_ms = call_timeout_ms;
     this.restart_limit = restart_limit;
     this.tenants = new Map();
-    this.epochs = new Map();
+    this.epochs = new Map(); // bounded replay metadata, independent of live worker identity
   }
   handle(raw) {
     let msg;
@@ -45,6 +47,9 @@ export class TenantSupervisor {
   }
   #start(state) {
     state.generation++;
+    if (!this.epochs.has(state.id) && this.epochs.size>=1024)
+      this.epochs.delete(this.epochs.keys().next().value);
+    this.epochs.delete(state.id);
     this.epochs.set(state.id,state.generation);
     const generation = state.generation;
     let worker;
@@ -71,8 +76,12 @@ export class TenantSupervisor {
     if (data.op==='result' && state.ready && state.pending && data.id===state.pending.id) {
       clearTimeout(state.timer);state.timer=null;
       const id=state.pending.id;state.pending=null;
-      if (data.ok) this.#reply(id,true,{tenant:state.id,generation,...data.result});
-      else this.#failure(state,generation,typeof data.error==='string' ? data.error : 'E_GUEST_PANIC',id);
+      if (data.ok) {
+        let result;
+        try { result=normalize_guest_result(data.result); }
+        catch { this.#failure(state,generation,'E_GUEST_RESULT',id); return; }
+        this.#reply(id,true,{tenant:state.id,generation,...result});
+      } else this.#failure(state,generation,typeof data.error==='string' ? data.error.slice(0,512) : 'E_GUEST_PANIC',id);
       return;
     }
     if (data.op==='boot_failed' && !state.ready) this.#failure(state,generation,data.error || 'E_BOOT_FAILED');
