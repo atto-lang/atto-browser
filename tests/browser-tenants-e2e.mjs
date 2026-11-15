@@ -19,6 +19,8 @@ const files=new Map([
   ['/tests/browser-tenants/e2e.mjs',[new URL('./browser-tenants/e2e.mjs',import.meta.url),'text/javascript; charset=utf-8']],
   ['/tests/browser-tenants/byte-receiver.mjs',
     [new URL('./browser-tenants/byte-receiver.mjs',import.meta.url),'text/javascript; charset=utf-8']],
+  ['/tests/browser-tenants/js-counter.mjs',
+    [new URL('./browser-tenants/js-counter.mjs',import.meta.url),'text/javascript; charset=utf-8']],
   ...['client','protocol','supervisor-core','supervisor.worker','tenant.worker',
       'wasm-profile','wasm-tenant','route-protocol','send-receipt'].map(name=>
     ['/src/'+name+'.mjs',[new URL('../src/'+name+'.mjs',import.meta.url),'text/javascript; charset=utf-8']]),
