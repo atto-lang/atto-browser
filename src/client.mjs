@@ -39,8 +39,18 @@ export class BrowserTenantClient {
   spawn(tenant, { backend = 'wasm', entry, trusted = false } = {}) {
     return this.#request('spawn', { tenant: assert_tenant_id(tenant), backend, entry, trusted });
   }
-  call(tenant) { return this.#request('call', { tenant: assert_tenant_id(tenant) }); }
-  stop(tenant) { return this.#request('stop', { tenant: assert_tenant_id(tenant) }); }
+  // A tenant name alone is not authority. Reuse only a current spawn/ready handle.
+  #handle(handle) {
+    if (!handle || typeof handle!=='object') throw new Error('E_TENANT_HANDLE');
+    const tenant=assert_tenant_id(handle.tenant);
+    const generation=handle.generation, capability=handle.capability;
+    if (!Number.isSafeInteger(generation) || generation<1 ||
+        typeof capability!=='string' || !/^[0-9a-f-]{36}$/i.test(capability))
+      throw new Error('E_TENANT_HANDLE');
+    return {tenant,generation,capability};
+  }
+  call(handle) { return this.#request('call', this.#handle(handle)); }
+  stop(handle) { return this.#request('stop', this.#handle(handle)); }
   list() { return this.#request('list'); }
   on_event(callback) {
     if (typeof callback !== 'function') throw new TypeError('listener must be a function');
