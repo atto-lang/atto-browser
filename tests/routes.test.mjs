@@ -279,3 +279,47 @@ test('rejected next send after revocation is not mislabeled processed',()=>{
   assert.equal(result.failure.prior_receipts.length,1);
   assert.equal(result.failure.prior_receipts[0].outcome,'processed');
 });
+
+
+test('trusted JS actor receives exactly the same i64 route wire as compiled Wasm',()=>{
+  const h=fixture(),sender=h.spawn('sender'),js=h.spawn('trusted_js','js');
+  const route=grant(h,sender,js,1,'i64');
+  assert.equal(route.wire_type,'i64');
+  const wire=new ArrayBuffer(8);
+  new DataView(wire).setBigInt64(0,40n,true);
+  const id=h.send('send_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,wire_type:'i64',buffer:wire});
+  assert.equal(wire.byteLength,0,'send takes ownership of the sender buffer');
+  const received=h.workers[1].messages.at(-1);
+  assert.equal(received.actor_id,1);
+  assert.equal(received.wire_type,'i64');
+  assert.equal(new DataView(received.buffer).getBigInt64(0,true),40n);
+  assert.equal(received.capability,undefined);
+  h.workers[1].emit({op:'route_result',id,tenant:'trusted_js',generation:js.generation,
+    route_id:route.route_id,ok:true,result:{value:'delivered',stdout:'40\n',actors:1}});
+  const response=h.answer(id).result;
+  assert.equal(response.receipt.outcome,'processed');
+  assert.equal(response.stdout,'40\n');
+  const bytes_route=grant(h,sender,js,0,'bytes');
+  assert.equal(bytes_route.wire_type,'bytes','existing trusted JS byte routes remain supported');
+  const wrong=h.send('grant_route',{...js,target:sender,actor_id:0,wire_type:'i64'});
+  assert.equal(h.answer(wrong).error,'E_ROUTE_WIRE');
+});
+
+test('trusted JS checked overflow delivers a CONTROL notice then a failed route receipt',()=>{
+  const h=fixture(),sender=h.spawn('sender'),js=h.spawn('js','js');
+  const route=grant(h,sender,js,1,'i64');
+  const id=h.send('send_route',{...sender,route_id:route.route_id,
+    route_capability:route.route_capability,wire_type:'i64',buffer:new ArrayBuffer(8)});
+  h.workers[1].emit({op:'control',id,tenant:'js',generation:js.generation,
+    control:{kind:'panic',actor_id:1,parent_id:0,actor_type:'Counter',reason:'E_GUEST_PANIC_1'}});
+  assert.equal(h.events.at(-1).event,'actor_panic');
+  assert.equal(h.events.at(-1).priority,'CONTROL');
+  h.workers[1].emit({op:'route_result',id,tenant:'js',generation:js.generation,
+    route_id:route.route_id,ok:false,error:'E_GUEST_PANIC_1'});
+  assert.equal(h.answer(id).ok,false);
+  assert.equal(h.answer(id).failure.outcome,'unknown');
+  assert.equal(h.workers[1].terminated,true,'panicked JS tenant must terminate');
+  assert.equal(h.workers[0].terminated,false,'neighboring Wasm worker survives');
+  assert.ok(h.events.find(e=>e.event==='tenant_down'&&e.tenant==='js'));
+});
