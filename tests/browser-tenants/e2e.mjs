@@ -88,7 +88,7 @@ const off=client.on_event(event=>{report.events.push(event)});
     await client.stop(beta);
     check((await client.list()).length===0,'all tenant workers terminated and removed');
     await rejects(client.call(alpha),'E_NO_TENANT');
-    check(report.events.filter(x=>x.event==='tenant_stopped').length===3,
+    check(report.events.filter(x=>x.event==='tenant_stopped').length===5,
       'supervisor confirms each tenant shutdown');
     report.status='ok';
   }catch(error){
