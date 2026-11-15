@@ -13,6 +13,48 @@ if(!fixtures)throw new Error('E_FIXTURES_REQUIRED: compile actual AttoLang guest
 const root=new URL('../',import.meta.url);
 const sha256=createHash('sha256').update(
   await readFile(join(fixtures,'stateful-counter.wasm'))).digest('hex');
+const statefulBytes=await readFile(join(fixtures,'stateful-counter.wasm'));
+const hungBody=Uint8Array.from([0,0x03,0x40,0x0c,0,0x0b,0x00,0x0b]);
+function encode_uleb(n){
+  const bytes=[];do{let c=n&127;n=Math.floor(n/128);
+    if(n)c|=128;bytes.push(c)}while(n);return Uint8Array.from(bytes);
+}
+function read_uleb(bytes,offset){
+  let value=0,shift=0;for(let i=0;i<5;i++){
+    const v=bytes[offset++];if(v===undefined)throw new Error('E_WASM_TEST_LEB');
+    value+=(v&127)*2**shift;
+    if(!(v&128))return{value,offset};
+    shift+=7;
+  }
+  throw new Error('E_WASM_TEST_LEB');
+}
+function join_bytes(...blocks){return Buffer.concat(blocks.map(x=>Buffer.from(x)))}
+function make_noncooperating_state_guest(bytes) {
+  let offset=8;
+  while(offset<bytes.length) {
+    const begin=offset,id=bytes[offset++];
+    const len=read_uleb(bytes,offset);offset=len.offset;
+    const end=offset+len.value;
+    if(id===10) {
+      const count=read_uleb(bytes,offset);
+      assert.equal(count.value,6,'exact compiler emitted six bounded guest functions');
+      const original=read_uleb(bytes,count.offset);
+      const restStart=original.offset+original.value;
+      assert.ok(restStart<end);
+      const section=join_bytes(encode_uleb(count.value),
+        encode_uleb(hungBody.length),hungBody,bytes.subarray(restStart,end));
+      const mutant=join_bytes(bytes.subarray(0,begin),Uint8Array.of(10),
+        encode_uleb(section.length),section,bytes.subarray(end));
+      assert.equal(WebAssembly.validate(mutant),true,
+        'malicious guest keeps valid Wasm ABI yet cannot cooperate');
+      return mutant;
+    }
+    offset=end;
+  }
+  throw new Error('E_WASM_TEST_NO_CODE');
+}
+const noncooperating=make_noncooperating_state_guest(statefulBytes);
+const hungSha=createHash('sha256').update(noncooperating).digest('hex');
 // Valid 42-byte Wasm module whose main() loops forever; validates the
 // worker watchdog without relying on a JS busy-loop or mock worker.
 const hung_guest=Buffer.from('0061736d010000000105016000017e03020100070801046d61696e00000a0b01090003400c000b42000b','hex');
@@ -32,6 +74,9 @@ const files=new Map([
   ['/fixtures/hung.wasm',[hung_guest,'application/wasm']],
   ['/fixtures/stateful-counter.wasm',[new URL('file://'+join(fixtures,'stateful-counter.wasm')),'application/wasm']],
   ['/fixtures/stateful-pin.mjs',[Buffer.from('export const sha256='+JSON.stringify(sha256)+';'),'text/javascript; charset=utf-8']],
+  ['/fixtures/stateful-noncooperating.wasm',[noncooperating,'application/wasm']],
+  ['/fixtures/stateful-noncooperating-pin.mjs',
+    [Buffer.from('export const hungSha='+JSON.stringify(hungSha)+';'),'text/javascript; charset=utf-8']],
 ]);
 const requests=[];
 const server=createServer(async(req,res)=>{
