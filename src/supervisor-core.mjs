@@ -342,6 +342,7 @@ export class TenantSupervisor {
     // callers must await the ack before sending the next ordered message.
     const receipt_id=this.#receipt_id();
     target.pending={id:msg.id,kind:'route',route_id:route.id,route,receipt_id};
+    target.control_sent=false;
     this.active_route_sends++;
     target.timer=setTimeout(()=>this.#failure(target,target.generation,'E_ROUTE_TIMEOUT'),
       this.call_timeout_ms);
@@ -389,6 +390,7 @@ export class TenantSupervisor {
     const receipt_id=this.#receipt_id();
     target.pending={kind:'remote',id:sequence,route_id:route.id,route,receipt_id,source,
       source_generation:source.generation};
+    target.control_sent=false;
     state.index++;
     this.active_route_sends++;
     // A batch can contain 16 sequential sends: bound each delivery, not the
