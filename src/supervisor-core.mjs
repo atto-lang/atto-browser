@@ -1,6 +1,7 @@
 import { PROTOCOL, MAX_TENANTS, assert_entry_url, assert_request, error_text, normalize_guest_result } from './protocol.mjs';
 import { MAX_ROUTES, MAX_ROUTE_INFLIGHT, assert_route_id, assert_route_capability,
   assert_route_buffer, assert_route_target } from './route-protocol.mjs';
+import {create_send_receipt,create_send_failure} from './send-receipt.mjs';
 
 // Run in a dedicated Web Worker. Service Workers can be terminated by browsers.
 export class TenantSupervisor {
@@ -20,6 +21,7 @@ export class TenantSupervisor {
     this.routes = new Map();
     this.next_route_id = 0;
     this.next_internal_id = 0;
+    this.next_receipt_id=0;
     this.active_route_sends = 0;
     this.next_generation = 0; // monotonic supervisor-wide; never reissue incarnation
   }
@@ -40,7 +42,25 @@ export class TenantSupervisor {
       }
     } catch (e) { this.#reply(msg.id, false, undefined, error_text(e)); }
   }
-  #reply(id, ok, result, error) { this.reply({ protocol: PROTOCOL, id, ok, ...(ok ? { result } : { error }) }); }
+  #reply(id, ok, result, error, failure=null) {
+    this.reply({protocol:PROTOCOL,id,ok,
+      ...(ok ? {result} : {error,...(failure ? {failure}: {})})});
+  }
+  #receipt_id() {
+    if(this.next_receipt_id>=Number.MAX_SAFE_INTEGER)throw new Error('E_RECEIPT_ID_EXHAUSTED');
+    return ++this.next_receipt_id;
+  }
+  #route_error_code(reason) {
+    if(reason==='E_ROUTE_TIMEOUT' || reason==='E_CALL_TIMEOUT')return 'E_ROUTE_TIMEOUT';
+    if(reason==='E_REMOTE_ROUTE_STALE' || reason==='E_ROUTE_STALE')return 'E_ROUTE_STALE';
+    if(reason==='E_REMOTE_BACKPRESSURE' || reason==='E_TENANT_BUSY')return 'E_ROUTE_BACKPRESSURE';
+    if(reason==='E_STOPPED' || reason==='E_ROUTE_NOT_READY')return 'E_ROUTE_UNAVAILABLE';
+    if(reason==='E_WORKER_CRASH' || reason==='E_WORKER_MESSAGE')return 'E_ROUTE_CRASH';
+    if(reason==='E_ROUTE_REVOKED')return 'E_ROUTE_REVOKED';
+    if(reason==='E_REMOTE_PROTOCOL' || reason==='E_REMOTE_RESULT')return 'E_ROUTE_PROTOCOL';
+    if(reason.startsWith('E_GUEST_') || reason.startsWith('E_REMOTE_DELIVERY:'))return 'E_ROUTE_RECEIVER';
+    return 'E_ROUTE_UNKNOWN';
+  }
   #event(name, tenant, generation, reason, capability) {
     this.event({ protocol: PROTOCOL, event: name, tenant, generation,
       ...(reason ? { reason } : {}), ...(capability ? { capability } : {}) });
@@ -135,16 +155,26 @@ export class TenantSupervisor {
           if(new TextEncoder().encode(ack.stdout).byteLength>4096)
             throw new Error('E_REMOTE_ACK_SIZE');
         }catch {
-          this.#failure(pending.source,pending.source_generation,'E_REMOTE_RESULT');
+          const receipt=create_send_receipt(pending.route,pending.receipt_id,
+            'unknown','E_ROUTE_PROTOCOL');
+          this.#failure(pending.source,pending.source_generation,'E_REMOTE_RESULT',null,
+            create_send_failure('E_ROUTE_PROTOCOL','unknown',receipt));
           this.#failure(state,generation,'E_REMOTE_RESULT');return;
         }
         const source_call=pending.source.pending;
-        if(source_call?.kind==='call_remote')
-          source_call.acks.push({route_id:pending.route_id,value:ack.value,stdout:ack.stdout});
+        if(source_call?.kind==='call_remote') {
+          const receipt=create_send_receipt(pending.route,pending.receipt_id,'processed','OK');
+          source_call.receipts.push(receipt);
+          source_call.acks.push({route_id:pending.route_id,value:ack.value,stdout:ack.stdout,
+            receipt});
+        }
         this.#deliver_guest_next(pending.source);
       } else {
         const reason=typeof data.error==='string' ? data.error.slice(0,256) : 'E_REMOTE_GUEST';
-        this.#failure(pending.source,pending.source_generation,'E_REMOTE_DELIVERY: '+reason);
+        const receipt=create_send_receipt(pending.route,pending.receipt_id,
+          'unknown','E_ROUTE_RECEIVER');
+        this.#failure(pending.source,pending.source_generation,'E_REMOTE_DELIVERY: '+reason,
+          null,create_send_failure('E_ROUTE_RECEIVER','unknown',receipt));
         if(reason.startsWith('E_GUEST_PANIC') || reason.startsWith('E_GUEST_TRAP'))
           this.#failure(state,generation,reason);
       }
@@ -159,17 +189,29 @@ export class TenantSupervisor {
       if(data.ok) {
         let result;
         try {result=normalize_guest_result(data.result)}
-        catch {this.#failure(state,generation,'E_ROUTE_RESULT');this.#reply(pending.id,false,undefined,'E_ROUTE_RESULT');return;}
+        catch {
+          const receipt=create_send_receipt(pending.route,pending.receipt_id,
+            'unknown','E_ROUTE_PROTOCOL');
+          this.#failure(state,generation,'E_ROUTE_RESULT');
+          this.#reply(pending.id,false,undefined,'E_ROUTE_RESULT',
+            create_send_failure('E_ROUTE_PROTOCOL','unknown',receipt));return;
+        }
         this.#reply(pending.id,true,{tenant:state.id,generation,
-          route_id:pending.route_id,...result});
+          route_id:pending.route_id,...result,
+          receipt:create_send_receipt(pending.route,pending.receipt_id,'processed','OK')});
       } else {
         const reason=typeof data.error==='string' ? data.error.slice(0,512) : 'E_ROUTE_GUEST';
         // Missing actor/handler is a recoverable route error; guest panics and
         // malformed endpoint results terminate the recipient, not the sender.
+        // Delivery was dispatched: a guest error cannot prove that no
+        // effects occurred before it returned an error.
+        const receipt=create_send_receipt(pending.route,pending.receipt_id,
+          'unknown','E_ROUTE_RECEIVER');
+        const failure=create_send_failure('E_ROUTE_RECEIVER','unknown',receipt);
         if(reason==='E_ACTOR_REF' || reason==='E_ROUTE_UNSUPPORTED' ||
-            reason==='E_GUEST_NOT_READY') this.#reply(pending.id,false,undefined,reason);
+            reason==='E_GUEST_NOT_READY') this.#reply(pending.id,false,undefined,reason,failure);
         else {
-          this.#reply(pending.id,false,undefined,reason);
+          this.#reply(pending.id,false,undefined,reason,failure);
           this.#failure(state,generation,reason);
         }
       }
@@ -195,7 +237,7 @@ export class TenantSupervisor {
         } else {
           // Completion ack is delayed until every remote receive returns.
           // This is a host-level batch ack, not yet a per-send Result<T,E>.
-          state.pending={kind:'call_remote',id,messages,index:0,acks:[],
+          state.pending={kind:'call_remote',id,messages,index:0,acks:[],receipts:[],
             result:{tenant:state.id,generation,...result}};
           this.#deliver_guest_next(state);
         }
@@ -298,7 +340,8 @@ export class TenantSupervisor {
     if(this.active_route_sends>=MAX_ROUTE_INFLIGHT)throw new Error('E_ROUTE_BACKPRESSURE');
     // Admission is atomic within the supervisor event loop. No queue is held:
     // callers must await the ack before sending the next ordered message.
-    target.pending={id:msg.id,kind:'route',route_id:route.id};
+    const receipt_id=this.#receipt_id();
+    target.pending={id:msg.id,kind:'route',route_id:route.id,route,receipt_id};
     this.active_route_sends++;
     target.timer=setTimeout(()=>this.#failure(target,target.generation,'E_ROUTE_TIMEOUT'),
       this.call_timeout_ms);
@@ -317,7 +360,8 @@ export class TenantSupervisor {
     if(state.index===state.messages.length) {
       clearTimeout(source.timer);source.timer=null;
       source.pending=null;
-      this.#reply(state.id,true,{...state.result,remote_acks:state.acks});
+      this.#reply(state.id,true,{...state.result,remote_acks:state.acks,
+        remote_receipts:state.receipts});
       return;
     }
     const message=state.messages[state.index];
@@ -342,7 +386,8 @@ export class TenantSupervisor {
     const buffer=new ArrayBuffer(8);
     new DataView(buffer).setBigInt64(0,message.value,true);
     const sequence=++this.next_internal_id;
-    target.pending={kind:'remote',id:sequence,route_id:route.id,source,
+    const receipt_id=this.#receipt_id();
+    target.pending={kind:'remote',id:sequence,route_id:route.id,route,receipt_id,source,
       source_generation:source.generation};
     state.index++;
     this.active_route_sends++;
