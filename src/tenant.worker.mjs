@@ -24,6 +24,12 @@ self.onmessage=async({data})=>{
     return;
   }
   if(!state || data.tenant!==state.tenant || data.generation!==state.generation)return;
+  if(data.op==='bind_route') {
+    if(state.backend!=='wasm' || !Number.isSafeInteger(data.slot) ||
+       data.slot<1 || data.slot>16 || typeof state.handler.bind_route!=='function')return;
+    state.handler.bind_route(data.slot);
+    return;
+  }
   if(data.op==='call' && Number.isSafeInteger(data.id) && data.id>0){
     if(state.busy) {
       self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,generation:state.generation,
@@ -31,8 +37,13 @@ self.onmessage=async({data})=>{
     }
     state.busy=true;
     try{
-      const result=normalize_guest_result(await state.handler.on_message());
-      self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,generation:state.generation,ok:true,result});
+      const raw=await state.handler.on_message();
+      const result=normalize_guest_result(raw);
+      const remote_sends=state.backend==='wasm' &&
+        typeof state.handler.take_remote_sends==='function' ?
+        state.handler.take_remote_sends() : [];
+      self.postMessage({protocol:PROTOCOL,op:'result',id:data.id,
+        generation:state.generation,tenant:state.tenant,ok:true,result,remote_sends});
     }catch(e){
       if(state.backend==='wasm' && e?.actor_failure?.kind==='panic') {
         // Dedicated CONTROL envelope precedes the failed result. This is a
