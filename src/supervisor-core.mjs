@@ -34,6 +34,7 @@ export class TenantSupervisor {
         case 'list': this.#reply(msg.id, true, [...this.tenants.values()].map(t => ({tenant:t.id,generation:t.generation,ready:t.ready}))); break;
         case 'spawn': this.#spawn(msg); break;
         case 'call': this.#call(msg); break;
+        case 'call_receiver': this.#call_receiver(msg); break;
         case 'stop': this.#stop(msg); break;
         case 'grant_route': this.#grant_route(msg); break;
         case 'bind_route': this.#bind_route(msg); break;
@@ -68,11 +69,17 @@ export class TenantSupervisor {
   #spawn(msg) {
     if (this.tenants.has(msg.tenant)) throw new Error('E_TENANT_EXISTS');
     if (this.tenants.size >= MAX_TENANTS) throw new Error('E_TENANT_LIMIT');
-    if (!['wasm', 'js'].includes(msg.backend)) throw new Error('E_BACKEND');
+    if (!['wasm', 'js', 'receiver'].includes(msg.backend)) throw new Error('E_BACKEND');
+    if(msg.backend==='receiver' && (
+      typeof msg.owner!=='string' || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(msg.owner) ||
+      typeof msg.sha256!=='string' || !/^[0-9a-f]{64}$/.test(msg.sha256)))
+      throw new Error('E_RECEIVER_ADMISSION');
     // JS is same-origin code with origin capabilities, NOT an untrusted sandbox.
     if (msg.backend === 'js' && msg.trusted !== true) throw new Error('E_JS_REQUIRES_TRUST');
     const entry = assert_entry_url(msg.entry, this.origin);
     const state = {id:msg.tenant,backend:msg.backend,entry,trusted:msg.trusted === true,
+                   owner:msg.backend==='receiver'?msg.owner:null,
+                   sha256:msg.backend==='receiver'?msg.sha256:null,
                    generation:0,capability:null,worker_instance:null,restarts:0,worker:null,
                    pending:null,bindings:new Map(),boot_request:msg.id,ready:false,timer:null};
     this.tenants.set(state.id,state);
@@ -98,7 +105,8 @@ export class TenantSupervisor {
     worker.onerror = () => this.#failure(state,generation,'E_WORKER_CRASH');
     worker.onmessageerror = () => this.#failure(state,generation,'E_WORKER_MESSAGE');
     state.timer = setTimeout(() => this.#failure(state,generation,'E_BOOT_TIMEOUT'),this.boot_timeout_ms);
-    try { worker.postMessage({protocol:PROTOCOL,op:'boot',tenant:state.id,generation,backend:state.backend,entry:state.entry,trusted:state.trusted}); }
+    try { worker.postMessage({protocol:PROTOCOL,op:'boot',tenant:state.id,generation,backend:state.backend,entry:state.entry,trusted:state.trusted,
+        ...(state.backend==='receiver' ? {owner:state.owner,sha256:state.sha256}: {})}); }
     catch (e) { this.#failure(state,generation,'E_BOOT_POST: '+error_text(e)); }
   }
   #worker_message(state,generation,data) {
@@ -217,6 +225,29 @@ export class TenantSupervisor {
       }
       return;
     }
+    if(data.op==='receiver_result' && state.ready &&
+       state.pending?.kind==='receiver' && data.id===state.pending.id) {
+      if(data.tenant!==state.id) {
+        this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
+      }
+      if(data.ok) {
+        let result;
+        try {result=normalize_guest_result(data.result)}catch{
+          this.#failure(state,generation,'E_RECEIVER_PROTOCOL');return;
+        }
+        clearTimeout(state.timer);state.timer=null;state.pending=null;
+        this.#reply(data.id,true,{tenant:state.id,generation,...result});
+      }else if(data.error==='E_RECEIVER_METHOD' ||
+               data.error==='E_RECEIVER_ARGS' || data.error==='E_RECEIVER_CLOSED') {
+        // The guest wasn't executed: recoverable pre-dispatch rejection.
+        clearTimeout(state.timer);state.timer=null;state.pending=null;
+        this.#reply(data.id,false,undefined,data.error);
+      }else{
+        this.#failure(state,generation,
+          typeof data.error==='string' ? data.error.slice(0,256):'E_RECEIVER_FAILED');
+      }
+      return;
+    }
     if (data.op==='result' && state.ready && state.pending?.kind==='call' && data.id===state.pending.id) {
       const id=state.pending.id;
       if (data.ok) {
@@ -260,12 +291,36 @@ export class TenantSupervisor {
     if (!state) throw new Error('E_NO_TENANT');
     this.#authorize(msg,state);
     if (!state.ready) throw new Error('E_TENANT_NOT_READY');
+    if (state.backend==='receiver')throw new Error('E_RECEIVER_OP');
     if (state.pending) throw new Error('E_TENANT_BUSY');
     state.pending = { id:msg.id,kind:'call' };
     state.control_sent=false;
     state.timer = setTimeout(()=>this.#failure(state,state.generation,'E_CALL_TIMEOUT'),this.call_timeout_ms);
     try { state.worker.postMessage({protocol:PROTOCOL,op:'call',id:msg.id,generation:state.generation,tenant:state.id}); }
     catch(e) {this.#failure(state,state.generation,'E_CALL_POST: '+error_text(e));}
+  }
+  #call_receiver(msg) {
+    const state=this.tenants.get(msg.tenant);
+    if(!state)throw new Error('E_NO_TENANT');
+    this.#authorize(msg,state); // generation and supervisor-held capability
+    if(state.backend!=='receiver')throw new Error('E_RECEIVER_BACKEND');
+    if(!state.ready)throw new Error('E_TENANT_NOT_READY');
+    if(state.pending)throw new Error('E_TENANT_BUSY');
+    if(typeof msg.method!=='string' || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(msg.method))
+      throw new Error('E_RECEIVER_METHOD');
+    if(!Array.isArray(msg.args) || msg.args.length>8 ||
+        msg.args.some(x=>typeof x!=='bigint' ||
+          x<-(1n<<63n) || x>(1n<<63n)-1n))
+      throw new Error('E_RECEIVER_ARGS');
+    state.pending={kind:'receiver',id:msg.id};
+    state.control_sent=false;
+    state.timer=setTimeout(()=>this.#failure(state,state.generation,'E_CALL_TIMEOUT'),
+      this.call_timeout_ms);
+    try {
+      state.worker.postMessage({protocol:PROTOCOL,op:'call_receiver',
+        tenant:state.id,generation:state.generation,id:msg.id,
+        method:msg.method,args:msg.args});
+    }catch(error){this.#failure(state,state.generation,'E_RECEIVER_POST: '+error_text(error))}
   }
   #stop(msg) {
     const state=this.tenants.get(msg.tenant);
