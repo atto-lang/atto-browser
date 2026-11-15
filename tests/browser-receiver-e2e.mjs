@@ -35,7 +35,7 @@ const files=new Map([
   ['/tests/browser-tenants/js-counter.mjs',
     [new URL('./browser-tenants/js-counter.mjs',import.meta.url),'text/javascript; charset=utf-8']],
   ...['client','protocol','supervisor-core','supervisor.worker','tenant.worker',
-      'wasm-profile','wasm-tenant','receiver-tenant','route-protocol','send-receipt'].map(name=>
+      'wasm-profile','wasm-tenant','receiver-tenant','lease-registry','stateful-tenant','route-protocol','send-receipt'].map(name=>
     ['/src/'+name+'.mjs',[new URL('../src/'+name+'.mjs',import.meta.url),'text/javascript; charset=utf-8']]),
   ...['two-actors','actor-state','actor-overflow','remote-sender','remote-receiver'].map(name=>
     ['/fixtures/'+name+'.wasm',[new URL('file://'+join(fixtures,name+'.wasm')),'application/wasm']]),
