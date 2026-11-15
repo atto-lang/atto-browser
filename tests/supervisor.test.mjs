@@ -11,7 +11,13 @@ const mk = () => {
       workers.push(w);return w;
     },reply:x=>replies.push(x),event:x=>events.push(x)});
   let id=0;
-  const send=(op,data={})=>{supervisor.handle({protocol:PROTOCOL,id:++id,op,...data});return id};
+  const send=(op,data={})=>{
+    if ((op==='call'||op==='stop') && typeof data.tenant==='string' && data.capability===undefined) {
+      const last=events.filter(x=>x.event==='tenant_ready' && x.tenant===data.tenant).at(-1);
+      if(last) data={...data,generation:last.generation,capability:last.capability};
+    }
+    supervisor.handle({protocol:PROTOCOL,id:++id,op,...data});return id;
+  };
   return {workers,replies,events,send,supervisor};
 };
 const spawn=(h,tenant='t1',backend='wasm',trusted=false)=>h.send('spawn',{tenant,entry:'/guest.wasm',backend,trusted});
@@ -21,7 +27,7 @@ test('one worker per tenant; old generations are fenced',()=>{
   const h=mk();const one=spawn(h);const two=spawn(h,'t2');
   assert.equal(h.workers.length,2);ready(h.workers[0]);ready(h.workers[1]);
   assert.equal(h.replies.find(x=>x.id===one).result.generation,1);
-  assert.equal(h.replies.find(x=>x.id===two).result.generation,1);
+  assert.equal(h.replies.find(x=>x.id===two).result.generation,2);
   const call=h.send('call',{tenant:'t1'});
   h.workers[0].respond({op:'result',id:call,generation:1,ok:true,result:{value:'42'}});
   assert.equal(h.replies.find(x=>x.id===call).result.value,'42');
@@ -29,7 +35,7 @@ test('one worker per tenant; old generations are fenced',()=>{
   assert.equal(h.workers[0].terminated,true);
   assert.equal(h.workers[1].terminated,false);
   const again=spawn(h);ready(h.workers[2]);
-  assert.equal(h.replies.find(x=>x.id===again).result.generation,2);
+  assert.equal(h.replies.find(x=>x.id===again).result.generation,3);
   h.workers[0].respond({op:'result',id:999,generation:1,ok:true,result:{value:'bad'}});
   assert.equal(h.replies.some(x=>x.id===999),false);
 });
@@ -49,7 +55,7 @@ test('panic terminates worker and restarts generation',()=>{
   assert.equal(h.workers[0].terminated,true);
   assert.equal(h.workers.length,2);
   const before=h.send('call',{tenant:'t1'});
-  assert.equal(err(h,before),'E_TENANT_NOT_READY');
+  assert.equal(err(h,before),'E_STALE_TENANT_HANDLE');
   ready(h.workers[1]);
   assert.equal(h.events.filter(x=>x.event==='tenant_ready').length,2);
 });
@@ -60,7 +66,7 @@ test('timeout kills hung tenant but not neighbor',async()=>{
   assert.equal(err(h,hung),'E_CALL_TIMEOUT');
   assert.equal(h.workers[0].terminated,true);
   const good=h.send('call',{tenant:'t2'});
-  h.workers[1].respond({op:'result',id:good,generation:1,ok:true,result:{value:'7'}});
+  h.workers[1].respond({op:'result',id:good,generation:2,ok:true,result:{value:'7'}});
   assert.equal(h.replies.find(x=>x.id===good).result.value,'7');
 });
 test('second crash retires tenant after restart budget',()=>{
@@ -75,4 +81,37 @@ test('in-browser compiler blob URLs must carry the same origin',()=>{
   assert.equal(assert_entry_url('blob:https://app.example/fake-id','https://app.example'),'blob:https://app.example/fake-id');
   assert.throws(()=>assert_entry_url('blob:https://evil.example/id','https://app.example'),/E_ENTRY_ORIGIN/);
   assert.throws(()=>assert_entry_url('data:text/javascript,alert(1)','https://app.example'),/E_ENTRY_ORIGIN/);
+});
+
+test('old incarnation capability cannot call or stop replacement tenant',()=>{
+  const h=mk();const id=spawn(h);ready(h.workers[0]);
+  const old=h.replies.find(x=>x.id===id).result;
+  h.send('stop',{tenant:old.tenant,generation:old.generation,capability:old.capability});
+  const id2=spawn(h);ready(h.workers[1]);
+  const current=h.replies.find(x=>x.id===id2).result;
+  assert.notEqual(old.capability,current.capability);
+  assert.notEqual(old.generation,current.generation);
+  const replay=h.send('call',old);
+  assert.equal(err(h,replay),'E_STALE_TENANT_HANDLE');
+  const stop=h.send('stop',old);
+  assert.equal(err(h,stop),'E_STALE_TENANT_HANDLE');
+  const allowed=h.send('call',current);
+  h.workers[1].respond({op:'result',id:allowed,generation:current.generation,ok:true,result:{value:'42'}});
+  assert.equal(h.replies.find(x=>x.id===allowed).result.value,'42');
+});
+test('guest cannot spoof trusted tenant or generation fields',()=>{
+  const h=mk();const id=spawn(h);ready(h.workers[0]);
+  const handle=h.replies.find(x=>x.id===id).result;
+  const call=h.send('call',handle);
+  h.workers[0].respond({op:'result',id:call,generation:handle.generation,ok:true,
+    result:{tenant:'t2',generation:999,capability:'injected',value:'42',stdout:'',actors:0}});
+  const result=h.replies.find(x=>x.id===call).result;
+  assert.equal(result.tenant,'t1');
+  assert.equal(result.generation,handle.generation);
+  assert.equal(result.capability,undefined);
+  const bad=h.send('call',handle);
+  h.workers[0].respond({op:'result',id:bad,generation:handle.generation,ok:true,
+    result:{value:'42',stdout:'X'.repeat((1<<20)+1)}});
+  assert.equal(err(h,bad),'E_GUEST_RESULT');
+  assert.equal(h.workers[0].terminated,true);
 });
