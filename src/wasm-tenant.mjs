@@ -30,7 +30,9 @@ async function read_bounded(response) {
 // A tenant has its own Worker. Actors inside it have distinct Wasm instances,
 // linear memories and globals; this is not one browser thread per actor.
 export async function open_wasm_tenant(entry) {
-  const response=await fetch(entry,{credentials:'omit'});
+  // Reject redirects before following them: a same-origin URL must not
+  // cause a cross-origin request or load a different guest artifact.
+  const response=await fetch(entry,{credentials:'omit',mode:'same-origin',redirect:'error'});
   if(!response.ok)throw new Error('E_WASM_FETCH');
   if (response.redirected || (response.url && new URL(response.url).origin!==new URL(entry).origin)) throw new Error('E_WASM_REDIRECT');
   const buffer=await read_bounded(response);
