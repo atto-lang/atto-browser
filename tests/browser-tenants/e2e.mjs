@@ -45,6 +45,8 @@ const off=client.on_event(event=>{report.events.push(event)});
     check(notice.priority==='CONTROL' && notice.actor_id===1 && notice.parent_id===0 &&
       notice.actor_type==='W' && notice.reason==='E_GUEST_PANIC_1',
       'supervisor receives typed actor panic metadata on CONTROL lane');
+    await wait_for(()=>report.events.find(x=>x.event==='tenant_down' &&
+      x.tenant==='tenant_fault' && x.generation===failed.generation),'tenant_down after actor panic');
     const panic_index=report.events.indexOf(notice);
     const down_index=report.events.findIndex(x=>x.event==='tenant_down' &&
       x.tenant==='tenant_fault' && x.generation===failed.generation);
