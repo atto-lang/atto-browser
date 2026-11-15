@@ -64,6 +64,9 @@ export async function open_wasm_tenant(entry) {
   // actor must not be misreported using the main instance's panic_code.
   let active_guest=null;
   let active_actor=null; // null means the main entrypoint, not an actor
+  const remote_slots=new Set();
+  const outbound=[];
+  const MAX_GUEST_REMOTE_SENDS=16; // bounded until host confirms their delivery
 
   function instantiate() {
     let instance;
@@ -107,6 +110,13 @@ export async function open_wasm_tenant(entry) {
         } catch (e) { actors.delete(id); throw e; }
       },
       actor_send:(ref,value)=>{
+        if (Number.isInteger(ref) && ref<0) {
+          const slot=-ref;
+          if(!remote_slots.has(slot))throw new Error('E_ROUTE_UNBOUND');
+          if(outbound.length>=MAX_GUEST_REMOTE_SENDS)throw new Error('E_ROUTE_BACKPRESSURE');
+          outbound.push({slot,value:BigInt(value)});
+          return;
+        }
         const actor=actors.get(ref);
         if(!actor)throw new Error('E_ACTOR_REF');
         if(!actor.instance)throw new Error('E_ACTOR_NOT_READY');
@@ -159,6 +169,16 @@ export async function open_wasm_tenant(entry) {
         drain_mail();
       }catch(e){throw make_guest_error(e);}
       return {value:String(value),stdout:stdout_chunks.join(''),actors:actors.size};
+    },
+    // Only the supervisor may install a host-owned slot. Guest Wasm has no
+    // route token, tenant generation, or authority to bind new routes.
+    bind_route(slot){
+      if(!Number.isSafeInteger(slot) || slot<1 || slot>16)throw new Error('E_ROUTE_SLOT');
+      remote_slots.add(slot);
+    },
+    take_remote_sends(){
+      const messages=outbound.splice(0,outbound.length);
+      return messages;
     },
     async on_route({actor_id,wire_type,buffer}) {
       if(executions!==1)throw new Error('E_GUEST_NOT_READY');
