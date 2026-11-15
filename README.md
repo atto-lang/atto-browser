@@ -142,3 +142,20 @@ hostile same-origin JavaScript. State/lease-bearing `mtd` stays rejected.
 
 For executed real Chromium coverage:
 `ATTO_BROWSER_FIXTURE_DIR=/path/to/compiled/guests npm run test:browser-receiver`.
+
+### Receiver ABI and CONTROL hardening
+
+The compiler-pinned module must expose **only** `panic_code`,
+`atto.actor_close`, `atto.bind.<Actor>`, and
+`atto.receiver.<Actor>.<method>.<arity>`; unknown exports or methods without
+a matching binder are rejected even if the Wasm bytes have a valid matching
+SHA-256. Actor/method identifiers are capped at 256 ASCII characters.
+Supervisor receiver results must have exactly one actor, no stdout, and a
+canonical decimal signed 64-bit return. CONTROL notices from a receiver worker
+must identify its bound actor (`actor_id=1,parent_id=0`) and the exact owner;
+a guest trap error without a preceding CONTROL envelope is treated as a
+protocol violation, never a proven panic notification.
+
+These rules apply only to the immutable, scalar, one-actor-per-worker preview.
+They do not authorize mutable actor state, production mailbox scheduling, or
+lease cleanup.
