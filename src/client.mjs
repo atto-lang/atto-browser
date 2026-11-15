@@ -1,4 +1,5 @@
 import { PROTOCOL, assert_tenant_id } from './protocol.mjs';
+import { assert_route_id, assert_route_capability, assert_route_buffer } from './route-protocol.mjs';
 
 export class BrowserTenantClient {
   #worker;
@@ -34,7 +35,7 @@ export class BrowserTenantClient {
     this.#pending.clear();
     this.#worker.terminate();
   }
-  #request(op, data = {}) {
+  #request(op, data = {}, transfer = []) {
     if (this.#closed) return Promise.reject(new Error('E_CLIENT_CLOSED'));
     if (this.#pending.size>=BrowserTenantClient.MAX_PENDING)
       return Promise.reject(new Error('E_CLIENT_PENDING_LIMIT'));
@@ -45,7 +46,7 @@ export class BrowserTenantClient {
     const id = this.#next++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
-      try { this.#worker.postMessage({ protocol: PROTOCOL, id, op, ...data }); }
+      try { this.#worker.postMessage({ protocol: PROTOCOL, id, op, ...data },transfer); }
       catch (e) { this.#pending.delete(id); reject(e); }
     });
   }
@@ -66,6 +67,34 @@ export class BrowserTenantClient {
   call(handle) { return this.#request('call', this.#handle(handle)); }
   stop(handle) { return this.#request('stop', this.#handle(handle)); }
   list() { return this.#request('list'); }
+  // The application must possess BOTH tenant handles before granting a route.
+  // A grant allows a specific source incarnation to reach one target endpoint.
+  grant_route(source,target,{actor_id=1,wire_type='i64'}={}) {
+    return this.#request('grant_route',{...this.#handle(source),
+      target:this.#handle(target),actor_id,wire_type});
+  }
+  // rt take: the ArrayBuffer detaches as soon as postMessage succeeds, even
+  // if the destination rejects the send. rt copy: caller keeps its original.
+  // SharedArrayBuffer, views and detached/oversized payloads are rejected.
+  send_route(source,route,buffer,{mode='take'}={}) {
+    if(mode!=='take' && mode!=='copy') return Promise.reject(new Error('E_ROUTE_OWNERSHIP'));
+    const wire_type=route?.wire_type;
+    if(wire_type!=='i64' && wire_type!=='bytes')
+      return Promise.reject(new Error('E_ROUTE_WIRE'));
+    try {
+      const original=assert_route_buffer(buffer,wire_type);
+      const payload=mode==='copy' ? original.slice(0) : original;
+      return this.#request('send_route',{...this.#handle(source),
+        route_id:assert_route_id(route.route_id),
+        route_capability:assert_route_capability(route.route_capability),
+        wire_type,buffer:payload},[payload]);
+    }catch(error){return Promise.reject(error)}
+  }
+  revoke_route(source,route) {
+    return this.#request('revoke_route',{...this.#handle(source),
+      route_id:assert_route_id(route.route_id),
+      route_capability:assert_route_capability(route.route_capability)});
+  }
   on_event(callback) {
     if (typeof callback !== 'function') throw new TypeError('listener must be a function');
     this.#listeners.add(callback);
