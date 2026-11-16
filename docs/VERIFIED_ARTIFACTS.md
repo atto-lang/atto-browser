@@ -16,6 +16,16 @@ names and other hidden public reachability roots. It does not add any host
 imports or capabilities. The default `sealedExports:false` preserves the
 legacy browser runtime ABI until dependent consumers migrate explicitly.
 
+The policy is also propagated by
+`runVerifiedCoreGuestInWorker({sealedExports:true,...})` to the actual
+single-use `guest-worker.mjs` entry, where the check runs before
+instantiation or execution. The parent validates that this flag is a
+boolean **before spawning any Worker**. New isolated Node Worker tests
+execute an accepted 42-returning guest and reject an otherwise-valid
+extra-export guest inside that Worker. A browser Worker is not an OS
+sandbox, and a void-returning browser `Worker.terminate()` cannot by
+itself certify physical quiescence or safe actor reincarnation.
+
 The same strict two-export boundary is required in the native
 `oreslang-source.wasm` scalar profile and its browser-targeted preflight.
 Tests use real, valid synthetic wasm32 modules: a 42-returning scalar guest
