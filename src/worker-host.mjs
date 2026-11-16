@@ -47,8 +47,10 @@ function validInt(x,min,max,name){
 }
 export function runVerifiedCoreGuestInWorker({
  wasmBytes,manifest,workerFactory,signal,
- timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32
+ timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32,
+ sealedExports=false
 }={}){
+ if(typeof sealedExports!=="boolean")fail("sealedExports must be a boolean");
  validInt(timeoutMs,1,30000,"timeoutMs");
  validInt(maxModuleBytes,8,1048576,"maxModuleBytes");
  validInt(maxMemoryPages,1,256,"maxMemoryPages");
@@ -130,7 +132,7 @@ export function runVerifiedCoreGuestInWorker({
    // Deliberately omit transfer list: guest module bytes have copy semantics.
    if(done)return;
    worker.postMessage({kind:"oreslang-core-run-v1",wasmBytes:bytes,
-    manifest:admittedManifest,maxModuleBytes,maxMemoryPages});
+    manifest:admittedManifest,maxModuleBytes,maxMemoryPages,sealedExports});
   }catch(error){settle(error)}
  });
 }
