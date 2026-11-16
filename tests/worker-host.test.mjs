@@ -199,3 +199,42 @@ test("Worker signed i64 exact min max and overflow responses are distinct",async
     assert.equal(worker.terminations,1);
   }
 });
+
+
+test("sealed exports are enforced inside the real isolated Node Worker",async()=>{
+ const strict=await runVerifiedCoreGuestInWorker({
+  wasmBytes:wasm,manifest:artifact,sealedExports:true,
+  workerFactory:isolatedNodeWorker
+ });
+ assert.equal(strict,42n);
+ const extraExports=Uint8Array.from([0,97,115,109,1,0,0,0,
+  ...section(1,[1,0x60,0,1,0x7e]),...section(3,[1,0]),
+  ...section(5,[1,1,2,2]),
+  ...section(7,[3,...name("main"),0,0,...name("memory"),2,0,
+      ...name("diagnostic"),0,0]),
+  ...section(10,[1,4,0,0x42,42,0x0b])]);
+ assert.equal(WebAssembly.validate(extraExports),true);
+ const digest=createHash("sha256").update(extraExports).digest("hex");
+ const extraManifest={...artifact,wasmSha256:digest,wasmBytes:extraExports.length};
+ // Legacy compatibility path is unchanged.
+ assert.equal(await runVerifiedCoreGuestInWorker({
+  wasmBytes:extraExports,manifest:extraManifest,
+  workerFactory:isolatedNodeWorker
+ }),42n);
+ // The same valid module must now fail *inside the real guest Worker*.
+ await assert.rejects(runVerifiedCoreGuestInWorker({
+  wasmBytes:extraExports,manifest:extraManifest,
+  sealedExports:true,workerFactory:isolatedNodeWorker
+ }),/execution rejected/);
+});
+
+test("malformed sealed-export flags fail before creating an isolated Worker",()=>{
+ for(const value of [0,1,null,"false",[],{}]){
+  let created=0;
+  assert.throws(()=>runVerifiedCoreGuestInWorker({
+   wasmBytes:wasm,manifest:artifact,sealedExports:value,
+   workerFactory:()=>{created++;return isolatedNodeWorker();}
+  }),/sealedExports must be a boolean/);
+  assert.equal(created,0);
+ }
+});
