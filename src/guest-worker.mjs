@@ -9,7 +9,8 @@ self.addEventListener("message",async event=>{
   const data=event.data;
   if(!data||data.kind!=="oreslang-core-run-v1")throw Error("invalid request");
   const result=await loadVerifiedCoreGuest(data.wasmBytes,data.manifest,{
-   maxModuleBytes:data.maxModuleBytes,maxMemoryPages:data.maxMemoryPages
+   maxModuleBytes:data.maxModuleBytes,maxMemoryPages:data.maxMemoryPages,
+   sealedExports:data.sealedExports === undefined ? false : data.sealedExports
   });
   const value=result.entry();
   if(typeof value!=="bigint"||value<-(1n<<63n)||value>(1n<<63n)-1n)
