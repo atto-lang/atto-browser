@@ -2,6 +2,10 @@
 
 Browser runtime APIs and JavaScript interoperability for AttoLang applications.
 
+## Naming migration and language authority
+
+This repository is maintained at [atto-lang/atto-browser](https://github.com/atto-lang/atto-browser); use `https://github.com/atto-lang/atto-browser.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
+
 ## Scope
 
 Browser integration APIs, worker interoperability, and web security boundaries.
@@ -31,6 +35,6 @@ This README describes the intended repository scope and does not imply implement
 
 **Security and portability boundary:** Browser worker boundaries are not per-actor memory protection by themselves. Validate messages, bound quotas, reject unsafe host imports, and handle worker termination/cancellation races.
 
-AttoLang is the public name; preserve existing Oreslang/.ores compatibility and use canonical .atto for new portable library source. This README defines scope, not feature readiness.
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
 
 **Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
