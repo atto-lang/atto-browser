@@ -59,6 +59,6 @@ test('foreign namespaces, wrong function kinds and duplicate imports fail closed
   assert.throws(()=>validateGuestImportABI(foreign,new WebAssembly.Module(foreign),{allowFloat:true}),
     /guest import not granted/);
   const valid=guest();
-  assert.throws(()=>validateGuestImportABI(valid,new WebAssembly.Module(MAGIC),{allowFloat:true}),
+  assert.throws(()=>validateGuestImportABI(valid,new WebAssembly.Module(Uint8Array.from(MAGIC)),{allowFloat:true}),
     /binary\/reflection import mismatch/);
 });
