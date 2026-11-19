@@ -199,3 +199,23 @@ Run actual Chromium:
 `ATTO_BROWSER_FIXTURE_DIR=/path/to/compiled/guests npm run test:browser-stateful`.
 The fixture `stateful-counter.wasm` must be built by the exact pinned Rust
 source compiler, not downloaded from another organization with a token.
+
+### Default borrowing and Worker ownership boundary
+
+AttoLang's target rule lets an ordinary nonprimitive call use an omitted
+`borrow!` for a scoped readonly loan; `reader(owner)` and
+`reader(borrow! owner)` are equivalent while the owner remains live.
+This browser host's **generation-fenced stateful write lease** is a separate
+authenticated host capability, not a general implementation of Atto source
+`borrow! mut`. The host must never retain a source-owned object merely
+because an argument was passed without an operator.
+
+Cross-worker ownership must be admitted explicitly: `take!` for validated
+unique transfer, `copy!!` for an independent mutable graph or `share!`
+for frozen/guarded shared storage. `pin!` does not make actor allocator
+relocation safe; `drop!` and cancellation require quiescent leases and
+verified cleanup. Those generalized Atto operations and compiled-language
+effects are **not implemented by this preview**. Existing scalar/worker
+messages do not certify object-graph transfer, and token generation fencing
+alone does not prove deep-copy or provenance safety.
+
