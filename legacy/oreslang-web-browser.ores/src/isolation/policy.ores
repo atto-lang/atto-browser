@@ -1,0 +1,74 @@
+// Pure Oreslang policy, NOT a process sandbox.
+// Trusted browser assigns positive tenant/origin IDs from canonical URLs.
+pub fnc may_reuse_renderer(int request_tenant, int request_origin,
+    int renderer_tenant, int renderer_origin, int renderer_generation,
+    bool renderer_live, bool sandbox_verified): bool {
+  if request_tenant <= 0 || request_origin <= 0; do return false; fi
+  if renderer_tenant <= 0 || renderer_origin <= 0; do return false; fi
+  if renderer_generation <= 0 || !renderer_live || !sandbox_verified; do
+    return false;
+  fi
+  return request_tenant == renderer_tenant &&
+         request_origin == renderer_origin;
+}
+
+// DOM access is same-origin AND same-tenant AND same-document-epoch only.
+pub fnc may_read_dom(int caller_tenant, int caller_origin,
+    int document_tenant, int document_origin,
+    int presented_epoch, int live_epoch, bool document_live): bool {
+  if caller_tenant <= 0 || caller_origin <= 0; do return false; fi
+  if document_tenant <= 0 || document_origin <= 0; do return false; fi
+  if presented_epoch <= 0 || live_epoch <= 0 || !document_live; do
+    return false;
+  fi
+  return caller_tenant == document_tenant &&
+         caller_origin == document_origin &&
+         presented_epoch == live_epoch;
+}
+
+// postMessage may be cross-origin WITHIN a tenant, but must target an
+// exact browser-resolved origin. Wildcard target origins not supported.
+pub fnc may_post_message(int sender_tenant, int target_tenant,
+    int expected_target_origin, int actual_target_origin,
+    int presented_epoch, int live_epoch,
+    bool sender_live, bool receiver_live): bool {
+  if sender_tenant <= 0 || target_tenant <= 0; do return false; fi
+  if expected_target_origin <= 0 || actual_target_origin <= 0; do
+    return false;
+  fi
+  if presented_epoch <= 0 || live_epoch <= 0; do return false; fi
+  if !sender_live || !receiver_live; do return false; fi
+  return sender_tenant == target_tenant &&
+         expected_target_origin == actual_target_origin &&
+         presented_epoch == live_epoch;
+}
+
+// Reject stale renderer handles even when a process ID is recycled.
+pub fnc may_deliver_renderer_ipc(int sender_tenant, int renderer_tenant,
+    int sender_origin, int renderer_origin,
+    int presented_generation, int actual_generation,
+    int presented_epoch, int actual_epoch,
+    bool renderer_live, bool sandbox_verified): bool {
+  if !may_reuse_renderer(sender_tenant, sender_origin,
+        renderer_tenant, renderer_origin,
+        actual_generation, renderer_live, sandbox_verified); do
+    return false;
+  fi
+  if presented_generation <= 0 || presented_epoch <= 0 ||
+     actual_epoch <= 0; do return false; fi
+  return presented_generation == actual_generation &&
+         presented_epoch == actual_epoch;
+}
+
+// Tokens are allocated by the trusted browser; never by web content.
+pub fnc may_commit_navigation(int token_tenant, int tab_tenant,
+    int token_tab, int actual_tab, int token_epoch,
+    int pending_epoch, bool pending, bool tab_live): bool {
+  if token_tenant <= 0 || tab_tenant <= 0; do return false; fi
+  if token_tab <= 0 || actual_tab <= 0; do return false; fi
+  if token_epoch <= 0 || pending_epoch <= 0; do return false; fi
+  if !pending || !tab_live; do return false; fi
+  return token_tenant == tab_tenant &&
+         token_tab == actual_tab &&
+         token_epoch == pending_epoch;
+}

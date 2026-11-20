@@ -1,0 +1,22 @@
+name: Browser static source audit
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  static-source-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Source structure only (not native execution)
+        run: sh ci/check-source.sh
+      - name: Native harness shell syntax
+        run: sh -n ci/verify-native.sh
+      - name: Real backend FFI harness shell syntax only
+        run: sh -n ci/verify-backend-ffi.sh
+      - name: Compile standalone C ABI headers and audit Qt FFI source
+        run: sh ci/check-qt-ffi.sh
