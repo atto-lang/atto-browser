@@ -1,0 +1,105 @@
+// Per-tab native history-state prototype. Each actor has a single state
+// field; critical handle_state transactions cannot suspend or send IPC.
+// Local fixture messages are not production authenticated commands.
+define actor TabSessionActor as
+  state {
+    back_depth: int = 0;
+    forward_depth: int = 0;
+  }
+
+  handle_operation(operation: String): String using state.read, state.write {
+    return self.handle_state(critical |s| -> {
+      if operation == "navigate"; do
+        if s.back_depth >= 1024; do return "history-full"; fi
+        s.back_depth = s.back_depth + 1;
+        s.forward_depth = 0;
+        return "navigated";
+      fi
+      if operation == "back"; do
+        if s.back_depth <= 1; do return "no-back"; fi
+        s.back_depth = s.back_depth - 1;
+        s.forward_depth = s.forward_depth + 1;
+        return "back";
+      fi
+      if operation == "forward"; do
+        if s.forward_depth <= 0; do return "no-forward"; fi
+        s.back_depth = s.back_depth + 1;
+        s.forward_depth = s.forward_depth - 1;
+        return "forward";
+      fi
+      return "rejected";
+    });
+  }
+
+  receive(ActorMail<String> mail): void {
+    if mail.value == "close"; do
+      self.send("closed");
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  // Two independent tabs share no mutable history data.
+  val first = await spawn TabSessionActor();
+  val second = await spawn TabSessionActor();
+  first.send("navigate");
+  val first_one = (await first.outputs.next()).value.unwrap();
+  second.send("navigate");
+  val second_one = (await second.outputs.next()).value.unwrap();
+  if first_one.value != "navigated" || second_one.value != "navigated"; do
+    stdio.stdout.write("FAIL:initial-tabs"); return;
+  fi
+
+  first.send("navigate");
+  val first_two = (await first.outputs.next()).value.unwrap();
+  if first_two.value != "navigated"; do
+    stdio.stdout.write("FAIL:second-navigation"); return;
+  fi
+  first.send("back");
+  val back = (await first.outputs.next()).value.unwrap();
+  if back.value != "back"; do
+    stdio.stdout.write("FAIL:back"); return;
+  fi
+  second.send("back");
+  val second_back = (await second.outputs.next()).value.unwrap();
+  if second_back.value != "no-back"; do
+    stdio.stdout.write("FAIL:cross-tab-state"); return;
+  fi
+  first.send("forward");
+  val forward = (await first.outputs.next()).value.unwrap();
+  if forward.value != "forward"; do
+    stdio.stdout.write("FAIL:forward"); return;
+  fi
+  first.send("back");
+  val back_again = (await first.outputs.next()).value.unwrap();
+  if back_again.value != "back"; do
+    stdio.stdout.write("FAIL:back-again"); return;
+  fi
+  first.send("navigate");
+  val nav = (await first.outputs.next()).value.unwrap();
+  if nav.value != "navigated"; do
+    stdio.stdout.write("FAIL:new-navigation"); return;
+  fi
+  first.send("forward");
+  val forward_cleared = (await first.outputs.next()).value.unwrap();
+  if forward_cleared.value != "no-forward"; do
+    stdio.stdout.write("FAIL:forward-not-cleared"); return;
+  fi
+  first.send("close");
+  second.send("close");
+  val first_closed = (await first.outputs.next()).value.unwrap();
+  val second_closed = (await second.outputs.next()).value.unwrap();
+  await first.get_done();
+  await second.get_done();
+  if first_closed.value != "closed" || second_closed.value != "closed"; do
+    stdio.stdout.write("FAIL:tab-close"); return;
+  fi
+  stdio.stdout.write("browser:tab-session-ok");
+  return;
+}

@@ -1,0 +1,59 @@
+// Native Oreslang actor-epoch fixture. Actor data exists only inside state.
+// Every write is under a sealed handle_state critical loan. No suspension or
+// messaging occurs inside a critical section.
+define actor TabEpochActor as
+  state { last_epoch: int = 0; }
+
+  apply_epoch(candidate: int): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
+      if candidate > 0 && candidate > s.last_epoch; do
+        s.last_epoch = candidate;
+        return candidate;
+      fi
+      return -1;
+    });
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == -1; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val reply = self.apply_epoch(mail.value);
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val tab = await spawn TabEpochActor();
+  tab.send(3);
+  val accepted = (await tab.outputs.next()).value.unwrap();
+  if accepted.value != 3; do
+    stdio.stdout.write("FAIL:initial-epoch"); return;
+  fi
+  tab.send(2);
+  val older = (await tab.outputs.next()).value.unwrap();
+  if older.value != -1; do
+    stdio.stdout.write("FAIL:old-navigation"); return;
+  fi
+  tab.send(3);
+  val repeated = (await tab.outputs.next()).value.unwrap();
+  if repeated.value != -1; do
+    stdio.stdout.write("FAIL:duplicate-epoch"); return;
+  fi
+  tab.send(4);
+  val newer = (await tab.outputs.next()).value.unwrap();
+  if newer.value != 4; do
+    stdio.stdout.write("FAIL:new-navigation"); return;
+  fi
+  tab.send(-1);
+  val stopped = (await tab.outputs.next()).value.unwrap();
+  await tab.get_done();
+  if stopped.value != 0; do
+    stdio.stdout.write("FAIL:shutdown"); return;
+  fi
+  stdio.stdout.write("browser:tab-epoch-ok");
+  return;
+}

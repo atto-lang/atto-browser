@@ -1,0 +1,46 @@
+import fnc {may_open_tab, may_focus_tab, may_persist_tab_session,
+            may_move_tab} from "../../src/desktop/tab_policy.ores";
+
+pub routine main(): void {
+  if !may_open_tab(1, 1, 10, 10, 2, 20, true, false, false); do
+    stdio.stdout.write("FAIL:open"); return;
+  fi
+  if may_open_tab(1, 2, 10, 10, 2, 20, true, false, false); do
+    stdio.stdout.write("FAIL:tenant-open"); return;
+  fi
+  if may_open_tab(1, 1, 10, 11, 2, 20, true, false, false); do
+    stdio.stdout.write("FAIL:profile-open"); return;
+  fi
+  if may_open_tab(1, 1, 10, 10, 20, 20, true, false, false); do
+    stdio.stdout.write("FAIL:quota-open"); return;
+  fi
+  if may_open_tab(1, 1, 10, 10, 2, 20, true, true, false); do
+    stdio.stdout.write("FAIL:private-open"); return;
+  fi
+  if !may_focus_tab(1, 1, 10, 10, 4, 4, true, true, true); do
+    stdio.stdout.write("FAIL:focus"); return;
+  fi
+  if may_focus_tab(1, 1, 10, 10, 4, 3, true, true, true); do
+    stdio.stdout.write("FAIL:stale-window"); return;
+  fi
+  if may_focus_tab(1, 1, 10, 10, 4, 4, true, true, false); do
+    stdio.stdout.write("FAIL:renderer-focus"); return;
+  fi
+  if !may_persist_tab_session(1, 1, 10, 10, false, false, true, true); do
+    stdio.stdout.write("FAIL:restore"); return;
+  fi
+  if may_persist_tab_session(1, 1, 10, 10, true, true, true, true); do
+    stdio.stdout.write("FAIL:private-restore"); return;
+  fi
+  if !may_move_tab(1, 1, 10, 10, false, false, true, true); do
+    stdio.stdout.write("FAIL:move"); return;
+  fi
+  if may_move_tab(1, 1, 10, 11, false, false, true, true); do
+    stdio.stdout.write("FAIL:cross-profile-move"); return;
+  fi
+  if may_move_tab(1, 1, 10, 10, false, true, true, true); do
+    stdio.stdout.write("FAIL:private-move"); return;
+  fi
+  stdio.stdout.write("browser:desktop-policy-ok");
+  return;
+}

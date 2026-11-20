@@ -1,0 +1,72 @@
+import fnc {may_prompt_notifications, may_display_notification,
+            may_show_worker_notification, may_route_notification_click}
+    from "../../src/notifications/notification_policy.ores";
+
+pub routine main(): void {
+  if !may_prompt_notifications(1, 1, 10, 10, true, true, true,
+                               true, false, false); do
+    stdio.stdout.write("FAIL:prompt"); return;
+  fi
+  if may_prompt_notifications(1, 1, 10, 10, true, true, false,
+                              true, false, false); do
+    stdio.stdout.write("FAIL:no-gesture"); return;
+  fi
+  if may_prompt_notifications(1, 1, 10, 10, true, false, true,
+                              true, false, false); do
+    stdio.stdout.write("FAIL:iframe-prompt"); return;
+  fi
+  if may_prompt_notifications(1, 1, 10, 10, false, true, true,
+                              true, false, false); do
+    stdio.stdout.write("FAIL:http-prompt"); return;
+  fi
+  if may_prompt_notifications(1, 2, 10, 10, true, true, true,
+                              true, false, false); do
+    stdio.stdout.write("FAIL:cross-tenant-prompt"); return;
+  fi
+  if may_prompt_notifications(1, 1, 10, 10, true, true, true,
+                              true, false, true); do
+    stdio.stdout.write("FAIL:private-prompt"); return;
+  fi
+  if !may_display_notification(1, 1, 10, 10, true, true, true,
+                                false, false, false, 1, 3, true); do
+    stdio.stdout.write("FAIL:deliver"); return;
+  fi
+  if may_display_notification(1, 1, 10, 10, true, true, true,
+                               true, false, false, 1, 3, true); do
+    stdio.stdout.write("FAIL:dnd"); return;
+  fi
+  if may_display_notification(1, 1, 10, 10, true, true, true,
+                               false, false, false, 3, 3, true); do
+    stdio.stdout.write("FAIL:spam-limit"); return;
+  fi
+  if may_display_notification(1, 1, 10, 11, true, true, true,
+                               false, false, false, 1, 3, true); do
+    stdio.stdout.write("FAIL:wrong-origin-grant"); return;
+  fi
+  if !may_show_worker_notification(1, 1, 10, 10, 30, 30,
+                                    4, 4, true, true); do
+    stdio.stdout.write("FAIL:worker-notification"); return;
+  fi
+  if may_show_worker_notification(1, 1, 10, 10, 30, 31,
+                                   4, 4, true, true); do
+    stdio.stdout.write("FAIL:partition-leak"); return;
+  fi
+  if may_show_worker_notification(1, 1, 10, 10, 30, 30,
+                                   3, 4, true, true); do
+    stdio.stdout.write("FAIL:stale-worker"); return;
+  fi
+  if !may_route_notification_click(1, 1, 10, 10, 7, 7,
+                                    true, true, true); do
+    stdio.stdout.write("FAIL:notification-click"); return;
+  fi
+  if may_route_notification_click(1, 1, 10, 10, 7, 7,
+                                   false, true, true); do
+    stdio.stdout.write("FAIL:synthetic-click"); return;
+  fi
+  if may_route_notification_click(1, 1, 10, 10, 7, 7,
+                                   true, false, true); do
+    stdio.stdout.write("FAIL:replayed-click"); return;
+  fi
+  stdio.stdout.write("browser:notifications-policy-ok");
+  return;
+}
