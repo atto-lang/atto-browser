@@ -13,15 +13,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify exact browser source head
+      - name: Verify physical source identity at exact PR head
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse --verify HEAD)" = "$EXPECTED_SHA"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          git rev-parse 'HEAD^{tree}'
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/verify_ci_checkout_head.sh
+      - name: Exercise adversarial Git checkout identity cases
+        run: python3 -m unittest discover -s tests -p test_ci_checkout_head_20261106.py -v
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
