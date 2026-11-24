@@ -1,0 +1,28 @@
+// Native Oreslang backend authority gate for Qt FFI v1 operations.
+// BrowserSupervisor must validate its own opaque IDs/generations and
+// authenticated trusted-host session before calling these pure predicates.
+// Integer equality alone does not authenticate an FFI caller.
+pub fnc may_dispatch_ui_command(int operation,
+    int session_tenant, int request_tenant,
+    int tab_id, int tab_tenant,
+    int presented_generation, int live_generation,
+    bool trusted_ui_bridge, bool session_live,
+    bool tab_live): bool {
+  if operation < 1 || operation > 9; do return false; fi
+  if session_tenant <= 0 || request_tenant <= 0; do return false; fi
+  if !trusted_ui_bridge || !session_live; do return false; fi
+  if session_tenant != request_tenant; do return false; fi
+  if operation == 1; do
+    // NEW_TAB has no previously allocated tab identity.
+    return tab_id == 0 && tab_tenant == 0 &&
+           presented_generation == 0 && live_generation == 0;
+  fi
+  if !tab_live || tab_id <= 0 || tab_tenant <= 0; do
+    return false;
+  fi
+  if presented_generation <= 0 || live_generation <= 0; do
+    return false;
+  fi
+  return session_tenant == tab_tenant &&
+         presented_generation == live_generation;
+}
