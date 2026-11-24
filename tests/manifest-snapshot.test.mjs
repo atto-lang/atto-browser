@@ -125,7 +125,11 @@ test("nested arrays and producer metadata refuse noncanonical numbers",()=>{
     assert.throws(()=>snapshotCoreManifest(m),/serialization/);
   }
   const snapshot=snapshotCoreManifest({outer:[{inner:Number.MAX_SAFE_INTEGER},0.125]});
-  assert.deepEqual(snapshot,{outer:[{inner:Number.MAX_SAFE_INTEGER},0.125]});
+  assert.equal(Object.getPrototypeOf(snapshot),null);
+  assert.equal(Object.getPrototypeOf(snapshot.outer[0]),null);
+  assert.equal(snapshot.outer.length,2);
+  assert.deepEqual({...snapshot.outer[0]},{inner:Number.MAX_SAFE_INTEGER});
+  assert.equal(snapshot.outer[1],0.125);
   assert.equal(Object.isFrozen(snapshot.outer[0]),true);
 });
 
