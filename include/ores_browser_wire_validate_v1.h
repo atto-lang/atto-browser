@@ -6,6 +6,7 @@
  * Include only after ores_browser_ui_abi_v1.h (or include standalone).
  */
 #include "ores_browser_ui_abi_v1.h"
+#include "ores_browser_chrome_url_v1.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,6 +18,20 @@ static inline int ores_browser_zero_bytes_v1(const void *data, size_t n) {
     if (bytes[i] != 0u) return 0;
   }
   return 1;
+}
+
+/* The startup record is part of the public ABI. The trusted backend must
+ * independently validate it before opening a session; the Qt frontend also
+ * checks the record it constructs. A noncanonical private-mode flag must
+ * never silently change which profile or storage partition is selected.
+ */
+static inline int ores_browser_validate_config_v1(
+    const OresBrowserConfig *config) {
+  return config &&
+         config->struct_size == sizeof(*config) &&
+         config->abi_version == ORES_BROWSER_UI_ABI_VERSION &&
+         config->private_session <= 1u &&
+         config->reserved == 0u;
 }
 
 /* Require a terminator, and canonical zero padding after first NUL.
@@ -48,7 +63,7 @@ static inline int ores_browser_validate_command_v1(
   if (command->operation == ORES_BROWSER_CMD_NAVIGATE) {
     /* Reject empty navigation rather than trusting a backend to guess. */
     if (command->url[0] == '\0') return 0;
-    return ores_browser_wire_string_v1(command->url, ORES_BROWSER_URL_BYTES);
+    return ores_browser_chrome_url_v1(command->url, ORES_BROWSER_URL_BYTES);
   }
   /* All non-navigation commands must not smuggle URL bytes. */
   return ores_browser_zero_bytes_v1(command->url, ORES_BROWSER_URL_BYTES);
@@ -72,7 +87,7 @@ static inline int ores_browser_validate_snapshot_v1(
         tab->active > 1u || tab->can_go_back > 1u ||
         tab->can_go_forward > 1u || tab->loading > 1u ||
         !ores_browser_wire_string_v1(tab->title, ORES_BROWSER_TITLE_BYTES) ||
-        !ores_browser_wire_string_v1(tab->display_url, ORES_BROWSER_URL_BYTES))
+        !ores_browser_chrome_url_v1(tab->display_url, ORES_BROWSER_URL_BYTES))
       return 0;
     active += tab->active;
     for (j = 0u; j < i; ++j) {
