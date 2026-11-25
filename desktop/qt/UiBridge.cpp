@@ -104,6 +104,12 @@ void BackendWorker::start() {
     config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
     // Privileged Oreslang supervisor chooses tenant and profile.
     config.private_session = 0;
+    // The trusted backend must repeat these checks; this is a frontend
+    // fail-closed preflight for the ABI record, not an authorization grant.
+    if (!ores_browser_validate_config_v1(&config)) {
+        failClosed(QStringLiteral("Invalid Oreslang startup configuration"));
+        return;
+    }
     const int32_t status = open_(&config, &handle_);
     if (status != ORES_BROWSER_OK || !handle_) {
         failClosed(QStringLiteral("Oreslang supervisor refused startup"));

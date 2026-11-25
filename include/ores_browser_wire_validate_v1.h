@@ -20,6 +20,20 @@ static inline int ores_browser_zero_bytes_v1(const void *data, size_t n) {
   return 1;
 }
 
+/* The startup record is part of the public ABI. The trusted backend must
+ * independently validate it before opening a session; the Qt frontend also
+ * checks the record it constructs. A noncanonical private-mode flag must
+ * never silently change which profile or storage partition is selected.
+ */
+static inline int ores_browser_validate_config_v1(
+    const OresBrowserConfig *config) {
+  return config &&
+         config->struct_size == sizeof(*config) &&
+         config->abi_version == ORES_BROWSER_UI_ABI_VERSION &&
+         config->private_session <= 1u &&
+         config->reserved == 0u;
+}
+
 /* Require a terminator, and canonical zero padding after first NUL.
  * UTF-8 correctness and bidirectional control protection are checked
  * separately by the Qt presentation boundary and trusted Oreslang host.
