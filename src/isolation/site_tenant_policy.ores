@@ -1,0 +1,113 @@
+// Site-tenant placement POLICY ONLY (not a URL/PSL resolver or sandbox).
+// Trusted profile broker issues positive IDs after PSL-aware, schemeful
+// canonical URL parsing. For https://www.example.com + api.example.com,
+// site_tenant_id identifies the same https://example.com site. Origin IDs
+// remain distinct! Never derive site_tenant_id by dropping labels blindly.
+// Explicitly split sites with independently-controlled customer subdomains.
+//
+// Renderer is a sandboxed OS process; exactly ONE trusted Oreslang
+// RendererSupervisorActor in its owning window process controls it.
+// This policy does not claim actual process launch, OS sandbox, or IsolateVM.
+pub fnc may_place_site_renderer(
+    int window_id, int renderer_window_id,
+    int profile_id, int renderer_profile_id,
+    int site_tenant_id, int renderer_site_tenant_id,
+    int storage_partition_id, int renderer_storage_partition_id,
+    int presented_process_generation, int live_process_generation,
+    bool sandbox_verified, bool renderer_live,
+    bool site_identity_verified, bool split_required): bool {
+  if window_id <= 0 || renderer_window_id <= 0; do return false; fi
+  if profile_id <= 0 || renderer_profile_id <= 0; do return false; fi
+  if site_tenant_id <= 0 || renderer_site_tenant_id <= 0; do
+    return false;
+  fi
+  if storage_partition_id <= 0 || renderer_storage_partition_id <= 0; do
+    return false;
+  fi
+  if presented_process_generation <= 0 || live_process_generation <= 0; do
+    return false;
+  fi
+  if !sandbox_verified || !renderer_live ||
+     !site_identity_verified || split_required; do return false; fi
+  return window_id == renderer_window_id &&
+         profile_id == renderer_profile_id &&
+         site_tenant_id == renderer_site_tenant_id &&
+         storage_partition_id == renderer_storage_partition_id &&
+         presented_process_generation == live_process_generation;
+}
+
+// Subdomains from the same trusted schemeful site MAY share an IsolateVM
+// only after an authoritative classification permits it. Never use
+// same-site reuse to confer origin-level access to DOM/storage/workers.
+// If customer-controlled subdomains, OAC/COOP, opaque origins, or other
+// isolation factors require stronger boundaries, split the isolate.
+pub fnc may_share_site_isolate(
+    int caller_window, int isolate_window,
+    int caller_profile, int isolate_profile,
+    int caller_site_tenant, int isolate_site_tenant,
+    int caller_partition, int isolate_partition,
+    bool canonical_site_verified, bool sandbox_verified,
+    bool origin_split_required, bool hosted_tenant_split_required): bool {
+  if caller_window <= 0 || isolate_window <= 0; do return false; fi
+  if caller_profile <= 0 || isolate_profile <= 0; do return false; fi
+  if caller_site_tenant <= 0 || isolate_site_tenant <= 0; do
+    return false;
+  fi
+  if caller_partition <= 0 || isolate_partition <= 0; do
+    return false;
+  fi
+  if !canonical_site_verified || !sandbox_verified ||
+     origin_split_required || hosted_tenant_split_required; do
+    return false;
+  fi
+  return caller_window == isolate_window &&
+         caller_profile == isolate_profile &&
+         caller_site_tenant == isolate_site_tenant &&
+         caller_partition == isolate_partition;
+}
+
+// One actor owns one specific renderer generation in a specific window.
+// Actual uniqueness/linearizable insertion requires the window registry;
+// this only checks two already-issued trusted records.
+pub fnc may_control_renderer(
+    int actor_window, int renderer_window,
+    int actor_id, int renderer_owner_actor_id,
+    int actor_site_tenant, int renderer_site_tenant,
+    int actor_generation, int renderer_generation,
+    bool actor_live, bool renderer_live, bool sandbox_verified): bool {
+  if actor_window <= 0 || renderer_window <= 0; do return false; fi
+  if actor_id <= 0 || renderer_owner_actor_id <= 0; do return false; fi
+  if actor_site_tenant <= 0 || renderer_site_tenant <= 0; do
+    return false;
+  fi
+  if actor_generation <= 0 || renderer_generation <= 0; do
+    return false;
+  fi
+  if !actor_live || !renderer_live || !sandbox_verified; do
+    return false;
+  fi
+  return actor_window == renderer_window &&
+         actor_id == renderer_owner_actor_id &&
+         actor_site_tenant == renderer_site_tenant &&
+         actor_generation == renderer_generation;
+}
+
+// Process/site colocation NEVER means cross-origin resource authority.
+// The privileged profile broker checks an exact canonical origin as well
+// as the partition before granting any DOM, storage or service-worker
+// operation. A page at api.example.com cannot read admin.example.com.
+pub fnc may_access_origin_resource(
+    int request_profile, int resource_profile,
+    int request_origin, int resource_origin,
+    int request_partition, int resource_partition,
+    bool request_document_live, bool origin_grant_live): bool {
+  if request_profile <= 0 || resource_profile <= 0; do return false; fi
+  if request_origin <= 0 || resource_origin <= 0; do return false; fi
+  if request_partition <= 0 || resource_partition <= 0; do
+    return false;
+  fi
+  if !request_document_live || !origin_grant_live; do return false; fi
+  return request_profile == resource_profile &&
+         request_origin == resource_origin &&
+         request_partition == resource_partition;
+}

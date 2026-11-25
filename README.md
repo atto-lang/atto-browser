@@ -1,4 +1,55 @@
-# atto-browser — one Web Worker per tenant (experimental)
+> **AI agent instructions (organization-wide):** Before working on code, issues, or pull requests, read and follow the [organization `AGENTS.md`](https://github.com/atto-lang/.github/blob/main/AGENTS.md), including its **merge-first stealth-development policy**. Honor any repository-local `AGENTS.md`, explicit holds, and GitHub-enforced rules.
+
+# atto-browser
+
+Browser runtime APIs and JavaScript interoperability for AttoLang applications.
+
+## Naming migration and language authority
+
+This repository is maintained at [atto-lang/atto-browser](https://github.com/atto-lang/atto-browser); use `https://github.com/atto-lang/atto-browser.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
+
+## Scope
+
+Browser integration APIs, worker interoperability, and web security boundaries.
+
+## Compatibility and design
+
+This package is intended to integrate with [AttoLang](https://github.com/atto-lang) while clearly separating portable language behavior from backend- and host-specific features. Document APIs, target restrictions, and security/trust boundaries.
+
+## Development and verification
+
+Refer to checked-in sources and CI workflows for verified build and test commands. Include platform-specific execution tests and publish exact-commit evidence before asserting backend parity or production readiness.
+
+## Project status
+
+This README describes the intended repository scope and does not imply implemented functionality or verified target coverage.
+
+## Related
+
+- [Language specification](https://github.com/atto-lang/atto-spec)
+- [Platform conformance](https://github.com/atto-lang/atto-platform-conformance)
+
+## Repository ownership and contribution routing
+
+**Belongs here:** Reusable browser-facing AttoLang APIs, DOM and Web Worker interop, capability-scoped host bridges and browser lifecycle adapters.
+
+**Belongs elsewhere:** JS lowering belongs in atto-source.js, Wasm compiler/runtime lowering in atto-source.wasm, the playground UI/release in atto-playground.
+
+**Security and portability boundary:** Browser worker boundaries are not per-actor memory protection by themselves. Validate messages, bound quotas, reject unsafe host imports, and handle worker termination/cancellation races.
+
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
+
+**Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Legacy provenance and transfer verification
+
+Related historical browser projects include `ores-truffle-oreslang/oreslang-web-browser.ores` and `ores-truffle-oreslang/oreslang-browser`; their identities and migration histories must be verified separately. The present checkout is `atto-lang/atto-browser`; matching names or imported history do not prove preserved numeric repository identity or runtime parity. Preserve working legacy `.ores` inputs and historical package/CLI aliases until compiler-backed replacements and consumers are verified. New source follows canonical `.atto` contracts.
+
+Browser APIs, embedding and UI experiments belong here; browser-engine security certification and managed browser services do not. [atto-lang](https://github.com/atto-lang) maintains language, portable libraries and tooling; [atto-co](https://github.com/atto-co) separately governs commercial deployment, tenancy, identity and billing. Further original-ID transfers or commercial carve-outs require separate owner authorization and independent security review. This document authorizes no transfer or private-source mirror.
+
+Before an authorized transfer, coordinate in [migration issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26) and review the authorized runbook. Record source and target administrators, numeric repository ID, exact SHA/tree, history, visibility, access and rulesets, PRs/issues, releases, packages, consumers, CI/runners, secrets, deploy keys, apps, webhooks, Pages and rollback ownership. Verify unchanged ID/history/tree and restored controls after transfer, then execute exact-head tests before changing consumers. Zero-step jobs are NOT_EXECUTED; host-only and source-free checks do not certify compiled guest execution or production capabilities.
+
+## Experimental tenant Worker runtime
 
 The browser host starts **one dedicated supervisor Web Worker**; the supervisor spawns **one dedicated tenant Web Worker per tenant**. Within a Wasm tenant, each actor gets an independent Wasm instance, globals, and linear memory, but actors are cooperatively dispatched on that tenant's single browser thread.
 
@@ -14,13 +65,13 @@ app.close();
 
 **Compatibility:** accepts the bounded Rust `atto-source.rs` browser guest ABI (`main: () -> i64`, optional `actor_init`/`actor_receive`, `atto` print and actor imports). JS backend accepts an ES module exporting `async function create_tenant({tenant,generation})` returning an object with `on_message()`; JS requires `trusted:true` because a Web Worker is **not a JavaScript security sandbox**. `trusted:true` is an API declaration, not a security authorization mechanism.
 
-**Fail-closed defaults:** strict same-origin HTTP(S) or `blob:` module URL (to support in-browser compilation without uploads); limited Wasm function imports; no cross-tenant message forwarding; actor and mailbox limits; per-tenant request serialization; worker watchdog timeout and termination; bounded restart and monotonically increasing incarnation. No SharedArrayBuffer is needed for v1. Worker IDs are not authority tokens.
+**Fail-closed defaults:** strict same-origin HTTP(S) or `blob:` module URL (to support in-browser compilation without uploads); limited Wasm function imports; no implicit cross-tenant message forwarding; actor and mailbox limits; per-tenant request serialization; worker watchdog timeout and termination; bounded restart and monotonically increasing incarnation. No SharedArrayBuffer is needed for v1. Worker IDs are not authority tokens.
 
-**Current limitations:** This is a worker-runtime integration slice, not a complete JS source transpiler, proof of memory-sandbox isolation, or cross-backend parity. It runs one `main()` per Wasm tenant incarnation; subsequent calls fail. Actor scheduling is synchronous and not preemptive within one tenant. An infinite loop is stopped by terminating the tenant worker from the separate supervisor. Cross-tenant transfers, actor-level supervision/control notices, zero-copy buffers, service-worker background work, crash-state restoration, Rust compiler-produced bundle manifests, and tenant-specific permissions are future work.
+**Current limitations:** This is a worker-runtime integration slice, not a complete JS source transpiler, proof of memory-sandbox isolation, or cross-backend parity. It runs one `main()` per Wasm tenant incarnation; subsequent calls fail. Actor scheduling is synchronous and not preemptive within one tenant. An infinite loop is stopped by terminating the tenant worker from the separate supervisor. General cross-tenant object transfers, actor-level supervision/control notices, physical zero-copy guarantees, service-worker background work, crash-state restoration, Rust compiler-produced bundle manifests, and tenant-specific permissions are future work.
 
 **Service Worker:** intentionally not the live supervisor because browsers may suspend/terminate Service Workers when idle. An optional Service Worker can implement offline cache, update events, and durable notifications, but cannot be relied upon to keep actor supervision alive.
 
-Run host-unit tests: `npm test` (Node 20+). Browser end-to-end and compiled Atto guest conformance tests remain required before claiming production readiness.
+Run host-unit tests: `npm test` (Node 22+). Browser end-to-end and compiled Atto guest conformance tests remain required before claiming production readiness.
 
 ### Incarnation-bound handles
 
@@ -86,15 +137,3 @@ The supervisor, not guest Wasm, issues monotonic correlation IDs and structured 
 Statuses are **`processed`** (receiver handler returned successfully), **`rejected`** (no delivery dispatched) and **`unknown`** (delivery was dispatched but crashed, timed out or could not be confirmed). This is a **processing acknowledgment**, not exactly-once semantics. Do **not automatically retry `unknown`**—the receiver may have applied the message. Earlier processed messages in a batch remain processed even when a later message fails. On remote-send failure the client rejects with the existing `Error.message` and an additional validated `error.failure = {protocol,code,outcome,receipt,prior_receipts}`. The `prior_receipts` list is bounded to 16.
 
 The current `remote_actor(...).send(...)` guest import still returns `void`, and the compiler still rejects `await`. This feature intentionally stops at **host-visible typed receipts** until proper Wasm continuation frames and a genuine guest-visible `Result<int,string>` can be implemented. Transport buffer ownership, no duplicate acknowledgments, restart fencing and unknown processing outcomes remain separate correctness obligations.
-
-## Repository ownership and contribution routing
-
-**Belongs here:** Reusable browser-facing AttoLang APIs, DOM and Web Worker interop, capability-scoped host bridges and browser lifecycle adapters.
-
-**Belongs elsewhere:** JS lowering belongs in atto-source.js, Wasm compiler/runtime lowering in atto-source.wasm, the playground UI/release in atto-playground.
-
-**Security and portability boundary:** Browser worker boundaries are not per-actor memory protection by themselves. Validate messages, bound quotas, reject unsafe host imports, and handle worker termination/cancellation races.
-
-AttoLang is the public name; preserve existing Oreslang/.ores compatibility and use canonical .atto for new portable library source. This README defines scope, not feature readiness.
-
-**Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
