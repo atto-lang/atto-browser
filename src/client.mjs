@@ -1,4 +1,4 @@
-import { PROTOCOL, assert_tenant_id } from './protocol.mjs';
+import { PROTOCOL, assert_tenant_id, assert_receiver_identifier } from './protocol.mjs';
 import { assert_route_id, assert_route_capability, assert_route_buffer } from './route-protocol.mjs';
 import {assert_send_receipt,assert_send_failure} from './send-receipt.mjs';
 
@@ -90,8 +90,7 @@ export class BrowserTenantClient {
   // Wasm binding secrets never leave the tenant worker. Avoid coercing BigInt.
   call_receiver(handle,method,...args) {
     try {
-      if(typeof method!=='string' || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(method))
-        throw new Error('E_RECEIVER_METHOD');
+      assert_receiver_identifier(method);
       if(args.length>8 || args.some(x=>typeof x!=='bigint' ||
           x<-(1n<<63n) || x>(1n<<63n)-1n))throw new Error('E_RECEIVER_ARGS');
       return this.#request('call_receiver',{...this.#handle(handle),method,args});

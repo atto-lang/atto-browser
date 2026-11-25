@@ -1,4 +1,5 @@
-import { PROTOCOL, assert_entry_url, error_text, normalize_guest_result } from './protocol.mjs';
+import { PROTOCOL, assert_entry_url, error_text, normalize_guest_result,
+  normalize_receiver_result } from './protocol.mjs';
 import { open_wasm_tenant } from './wasm-tenant.mjs';
 import { open_receiver_tenant } from './receiver-tenant.mjs';
 
@@ -43,7 +44,7 @@ self.onmessage=async({data})=>{
     }
     state.busy=true;
     try {
-      const result=normalize_guest_result(state.handler.on_receiver(data.method,data.args));
+      const result=normalize_receiver_result(state.handler.on_receiver(data.method,data.args));
       self.postMessage({protocol:PROTOCOL,op:'receiver_result',id:data.id,
         tenant:state.tenant,generation:state.generation,ok:true,result});
     }catch(error){

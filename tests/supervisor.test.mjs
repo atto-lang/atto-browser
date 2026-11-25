@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TenantSupervisor } from '../src/supervisor-core.mjs';
-import { PROTOCOL, assert_entry_url } from '../src/protocol.mjs';
+import { PROTOCOL, assert_entry_url, normalize_receiver_result, assert_receiver_identifier } from '../src/protocol.mjs';
 const mk = () => {
   const workers=[],replies=[],events=[];
   const supervisor=new TenantSupervisor({origin:'https://app.example',restart_limit:1,
@@ -164,4 +164,104 @@ test('boot failure reason is bounded and rejected worker is terminated',()=>{
   assert.equal(down.reason.length,512);
   ready(h.workers[1]);
   assert.ok(h.replies.find(x=>x.id===requested)?.ok);
+});
+
+const receiver_fixture=(h,owner='Worker')=>{
+  const req=h.send('spawn',{tenant:'receiver',backend:'receiver',entry:'/rx.wasm',
+    owner,sha256:'a'.repeat(64)});
+  if(!h.workers.length)return {req};
+  ready(h.workers[0]);
+  return {req,handle:h.replies.find(x=>x.id===req)?.result,worker:h.workers[0]};
+};
+
+test('receiver ABI names and signed-i64 result envelopes are strictly bounded',()=>{
+  assert.equal(assert_receiver_identifier('double'),'double');
+  assert.throws(()=>assert_receiver_identifier('x'.repeat(257)),/E_RECEIVER_METHOD/);
+  for(const result of [
+    {value:'9223372036854775808',stdout:'',actors:1},
+    {value:'-9223372036854775809',stdout:'',actors:1},
+    {value:'042',stdout:'',actors:1},
+    {value:'-0',stdout:'',actors:1},
+    {value:'42',stdout:'x',actors:1},
+    {value:'42',stdout:'',actors:0},
+    {value:'true',stdout:'',actors:1}
+  ]) assert.throws(()=>normalize_receiver_result(result),/E_RECEIVER_RESULT/);
+  assert.equal(normalize_receiver_result({value:'-9223372036854775808',stdout:'',actors:1}).value,
+    '-9223372036854775808');
+  assert.equal(normalize_receiver_result({value:'9223372036854775807',stdout:'',actors:1}).value,
+    '9223372036854775807');
+});
+
+test('receiver dispatch rejects overlong owner and method before worker execution',()=>{
+  const h=mk();
+  const invalid=h.send('spawn',{tenant:'receiver',backend:'receiver',entry:'/rx.wasm',
+    owner:'x'.repeat(257),sha256:'a'.repeat(64)});
+  assert.equal(err(h,invalid),'E_RECEIVER_ADMISSION');
+  assert.equal(h.workers.length,0);
+  const {handle,worker}=receiver_fixture(h);
+  assert.ok(handle);
+  const call=h.send('call_receiver',{...handle,method:'x'.repeat(257),args:[]});
+  assert.equal(err(h,call),'E_RECEIVER_METHOD');
+  assert.equal(worker.messages.length,1,'overlong method was never forwarded');
+});
+
+test('a receiver worker cannot forge a successful non-i64 or stateful result',()=>{
+  for(const bogus of [
+    {value:'9223372036854775808',stdout:'',actors:1},
+    {value:'1',stdout:'forged',actors:1},
+    {value:'1',stdout:'',actors:2},
+    {value:'1e2',stdout:'',actors:1}
+  ]) {
+    const h=mk(),{handle,worker}=receiver_fixture(h);
+    const id=h.send('call_receiver',{...handle,method:'double',args:[21n]});
+    worker.respond({op:'receiver_result',id,tenant:'receiver',
+      generation:handle.generation,ok:true,result:bogus});
+    assert.equal(err(h,id),'E_RECEIVER_PROTOCOL');
+    assert.equal(worker.terminated,true);
+    assert.equal(h.events.filter(e=>e.event==='actor_panic').length,0);
+  }
+});
+
+test('receiver CONTROL notices must match nominal owner, actor id and active request',()=>{
+  for(const fake of [
+    {kind:'panic',actor_id:2,parent_id:0,actor_type:'Worker',reason:'E_GUEST_PANIC_1'},
+    {kind:'panic',actor_id:1,parent_id:1,actor_type:'Worker',reason:'E_GUEST_PANIC_1'},
+    {kind:'panic',actor_id:1,parent_id:0,actor_type:'Other',reason:'E_GUEST_PANIC_1'},
+    {kind:'panic',actor_id:1,parent_id:0,actor_type:'Worker',reason:'E_GUEST_FAKE'}
+  ]) {
+    const h=mk(),{handle,worker}=receiver_fixture(h);
+    const id=h.send('call_receiver',{...handle,method:'double',args:[21n]});
+    worker.respond({op:'control',id,tenant:'receiver',
+      generation:handle.generation,control:fake});
+    assert.equal(err(h,id),'E_CONTROL_PROTOCOL');
+    assert.equal(worker.terminated,true);
+    assert.equal(h.events.filter(e=>e.event==='actor_panic').length,0);
+  }
+});
+
+test('receiver guest panic must have paired CONTROL notice before failed result',()=>{
+  const h=mk(),{handle,worker}=receiver_fixture(h);
+  const id=h.send('call_receiver',{...handle,method:'double',args:[21n]});
+  worker.respond({op:'receiver_result',id,tenant:'receiver',
+    generation:handle.generation,ok:false,error:'E_GUEST_PANIC_1'});
+  assert.equal(err(h,id),'E_CONTROL_MISSING');
+  assert.equal(worker.terminated,true);
+  assert.equal(h.events.filter(e=>e.event==='actor_panic').length,0);
+});
+test('receiver CONTROL cannot be followed by success or recoverable pre-dispatch error',()=>{
+  for(const second of [
+    {ok:true,result:{value:'42',stdout:'',actors:1}},
+    {ok:false,error:'E_RECEIVER_METHOD'}
+  ]) {
+    const h=mk(),{handle,worker}=receiver_fixture(h);
+    const id=h.send('call_receiver',{...handle,method:'double',args:[21n]});
+    worker.respond({op:'control',id,tenant:'receiver',generation:handle.generation,
+      control:{kind:'panic',actor_id:1,parent_id:0,actor_type:'Worker',
+        reason:'E_GUEST_PANIC_1'}});
+    worker.respond({op:'receiver_result',id,tenant:'receiver',
+      generation:handle.generation,...second});
+    assert.equal(err(h,id),'E_RECEIVER_PROTOCOL');
+    assert.equal(worker.terminated,true);
+    assert.equal(h.events.filter(e=>e.event==='actor_panic').length,1);
+  }
 });

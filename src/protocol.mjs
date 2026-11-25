@@ -4,6 +4,31 @@ export const MAX_ACTORS_PER_TENANT = 64;
 export const MAX_MAIL_PER_ACTOR = 1024;
 export const MAX_STDOUT_BYTES = 1 << 20;
 
+// Bounded names are required at every trust boundary: client, supervisor,
+// tenant worker, and Wasm export admission all enforce the same contract.
+export const MAX_RECEIVER_IDENTIFIER = 256;
+export function assert_receiver_identifier(value, reason='E_RECEIVER_METHOD') {
+  if(typeof value!=='string' || !value.length ||
+     value.length>MAX_RECEIVER_IDENTIFIER ||
+     !/^[A-Za-z_][A-Za-z_0-9]*$/.test(value))
+    throw new Error(reason);
+  return value;
+}
+
+export function normalize_receiver_result(raw) {
+  const result=normalize_guest_result(raw);
+  // The only executable receiver subset returns a signed i64; no stdout or
+  // spawn is possible. Reject a compromised/malformed worker success envelope
+  // instead of silently treating arbitrary text as a scalar return value.
+  if(result.actors!==1 || result.stdout!=='' ||
+     !/^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$/.test(result.value))
+    throw new Error('E_RECEIVER_RESULT');
+  const value=BigInt(result.value);
+  if(value<-(1n<<63n) || value>(1n<<63n)-1n)
+    throw new Error('E_RECEIVER_RESULT');
+  return result;
+}
+
 export function assert_tenant_id(id) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw new Error('E_TENANT_ID');
   return id;
