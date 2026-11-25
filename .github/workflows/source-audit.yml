@@ -42,5 +42,7 @@ jobs:
         run: sh -n ci/verify-native.sh
       - name: Real backend FFI harness shell syntax only
         run: sh -n ci/verify-backend-ffi.sh
+      - name: Fail-closed backend origin and unapproved-mirror admission
+        run: sh ci/check-backend-origin-admission.sh
       - name: Compile standalone C ABI headers and audit Qt FFI source
         run: sh ci/check-qt-ffi.sh

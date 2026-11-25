@@ -1,0 +1,57 @@
+# Native Qt browser session and ABI integration contract (DRAFT)
+
+This PR is stacked on snapshot ACK PR #11 at immutable parent `ec82ce91b1254eb031027705059e4948c9ec8148`. It reconciles the proposed two-session ABI contract of PR #8 with startup record validation PR #12 and the bounded UI queue in PR #9. It does **not** merge or close the separate PRs.
+
+## Security contracts
+
+- Startup `OresBrowserConfig` must be exactly ABI v1, correct size, private_session 0/1, reserved zero. The Qt preflight is not native tenant authorization; the actual compiled Oreslang supervisor must revalidate.
+- `NEW_TAB`, `NEXT_TAB`, `PREVIOUS_TAB` are *session-scoped* operations with tab ID and generation exactly zero; no URL for NEXT/PREV. An optional canonically padded URL on NEW_TAB is a wire-format allowance only and never authorizes a navigation.
+- All tab-specific operations require nonzero tab identity and generation; Oreslang checks session ownership and staleness.
+- Qt checks command shape **before** copying UTF-16 text into queued lambdas. The 64-command count bound and 2048-unit URL capture limit remain unchanged.
+- Existing worker-to-UI one-snapshot revision ACK backpressure and chrome-text anti-spoofing predicates remain unchanged.
+- Integration fixture tests two independently opened handles, separate tabs/revision ledgers, wrong-generation commands, invalid startup records and session-scoped navigation.
+- The ABI remains prospective until linked to real Oreslang AOT exports; a host-only compiled integration probe is not guest execution.
+
+## Required independent gates
+
+1. Exact Git blobs and portable C11/C++17 tests, GCC/Clang sanitizers.
+2. Real Qt 6/QML event-loop test and deliberately hung-FFI shutdown.
+3. Exact-head linked Oreslang AOT backend and two-session guest execution.
+4. Source-origin executable GitHub Actions and independent security review.
+5. OS process sandbox, site isolation, authenticated IPC and actor lifecycle security.
+
+**DRAFT / HOLD.** A zero-step Actions failure is NOT_EXECUTED, not a failing code test. Cross-org private source mirroring remains blocked by issue #4 until independent approval. No browser-completeness or production-security claim.
+
+## Follow-up: optional NEW_TAB URL boundary
+
+The initial integration accidentally allowed an optional URL at the wire
+validator while the Qt command capture gate rejected it and the worker did
+not encode the field. The bridge now accepts a bounded NEW_TAB URL in the
+pre-copy admission guard and encodes it as canonical UTF-8 in the worker.
+NAVIGATE still requires a nonempty URL, NEXT/PREV still forbid all URL bytes,
+all operations still enforce their tab capability shape. This is **not** URL
+canonicalization or origin authorization: the trusted Oreslang supervisor must
+perform those checks. The QML newTab() action still creates a blank tab; this
+correction makes the internal command boundary consistent with ABI v1.
+
+The unit suite now tests both optional URL admission and oversized rejection;
+CI grep checks ensure the worker does not revert to silently discarding it.
+No real Qt/guest execution evidence is implied by this source-only change.
+
+## FFI source-origin admission gate (2026-10-31)
+
+The previous `ci/verify-backend-ffi.sh` accepted a different checkout SHA when
+caller-provided source tree and checkout pins matched. That checks identity but
+**not independent security approval**. Until approval issue #4 is resolved,
+non-original checkout commits and non-origin GitHub Actions repository IDs are
+now explicitly rejected before any backend is loaded. A source-origin exact
+SHA is still required. `ci/check-backend-origin-admission.sh` is a fail-closed
+four-case denial test (missing pin, matching-tree mirror, unauthorized Actions
+repository, and original checkout with no backend). It never runs an FFI library.
+
+A later independently authorized mirror requires a separate reviewed change,
+bound to the exact approved destination ID/tree and retention rules; simply
+setting `EXPECTED_SOURCE_TREE` or `EXPECTED_CHECKOUT_SHA` is insufficient.
+The native FFI script now reports **ABI behavior** only, explicitly requiring
+separate LLVM compiler-origin/codegen attestation before runtime certification.
+The origin gate does not itself establish true backend provenance.

@@ -65,7 +65,11 @@ int main() {
     using Q = OresBrowserUiQueueV1;
     CHECK(Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, 0));
     CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 1, 0, 0));
-    CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, 1));
+    CHECK(Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, 1));
+    CHECK(Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, ORES_BROWSER_URL_BYTES - 1u));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 0, ORES_BROWSER_URL_BYTES));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 1, 0, 1));
+    CHECK(!Q::captureFits(ORES_BROWSER_CMD_NEW_TAB, 0, 1, 1));
     for (const auto op : {ORES_BROWSER_CMD_NEXT_TAB, ORES_BROWSER_CMD_PREVIOUS_TAB}) {
         CHECK(Q::captureFits(op, 0, 0, 0));
         CHECK(!Q::captureFits(op, 1, 1, 0));

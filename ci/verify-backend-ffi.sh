@@ -10,11 +10,17 @@ head=$(git rev-parse --verify HEAD) || fail "no Git HEAD"
 [ "${#head}" -eq 40 ] || fail "invalid source SHA"
 [ -n "${EXPECTED_SOURCE_SHA:-}" ] || fail "source SHA pin required"
 tree=$(git rev-parse --verify 'HEAD^{tree}') || fail "source tree unavailable"
-if [ "$EXPECTED_SOURCE_SHA" != "$head" ]; then
-  [ -n "${EXPECTED_SOURCE_TREE:-}" ] && [ "$EXPECTED_SOURCE_TREE" = "$tree" ] ||
-    fail "mirror tree not verified against approved source"
-  [ "${EXPECTED_CHECKOUT_SHA:-}" = "$head" ] ||
-    fail "mirror checkout commit pin required"
+# Source-origin only until independent security authorization (issue #4).
+# A matching mirror tree and checkout pin are NOT transfer authorization.
+# Approved alternate-runner support must arrive in a separately reviewed,
+# exact-tree-gated change after destination/retention approval.
+[ "$EXPECTED_SOURCE_SHA" = "$head" ] ||
+  fail "unapproved private source mirror checkout (issue #4)"
+# GitHub Actions repository identity is a second independent admission gate.
+# A local exact-head run may leave GITHUB_ACTIONS unset.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  [ "${GITHUB_REPOSITORY:-}" = "atto-lang/atto-browser" ] ||
+    fail "unapproved GitHub Actions repository origin (issue #4)"
 fi
 [ -z "$(git status --porcelain --untracked-files=all)" ] ||
   fail "repository checkout dirty"
@@ -47,4 +53,4 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I include \
   tests/abi/backend_integration.c -ldl -o "$tmp/backend-ffi"
 "$limiter" --kill-after=5s 30s "$tmp/backend-ffi" "$ORES_BROWSER_BACKEND_LIB" ||
   fail "real Oreslang backend FFI execution failed"
-printf 'NATIVE_BACKEND_FFI_ACCEPTANCE_PASS source_sha=%s checkout_sha=%s tree_sha=%s backend_sha256=%s\n' "$EXPECTED_SOURCE_SHA" "$head" "$tree" "$actual"
+printf 'BROWSER_ABI_BEHAVIOR_PASS (compiler provenance separately required) source_sha=%s checkout_sha=%s tree_sha=%s backend_sha256=%s\n' "$EXPECTED_SOURCE_SHA" "$head" "$tree" "$actual"

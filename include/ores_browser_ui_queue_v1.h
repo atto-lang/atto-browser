@@ -20,8 +20,10 @@ public:
             op > ORES_BROWSER_CMD_PREVIOUS_TAB ||
             id > 20u || generation > 20u || 
             url >= ORES_BROWSER_URL_BYTES) return false;
-        if (op == ORES_BROWSER_CMD_NEW_TAB ||
-            op == ORES_BROWSER_CMD_NEXT_TAB ||
+        if (op == ORES_BROWSER_CMD_NEW_TAB) {
+            return id == 0u && generation == 0u;
+        }
+        if (op == ORES_BROWSER_CMD_NEXT_TAB ||
             op == ORES_BROWSER_CMD_PREVIOUS_TAB) {
             return id == 0u && generation == 0u && url == 0u;
         }
