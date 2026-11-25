@@ -70,12 +70,16 @@ for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     echo "MISSING_STATE_EFFECT_DECLARATION: $actor" >&2
     exit 1
   }
-  if grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' "$actor" |
+  # Only inspect actor declarations: an ordinary DTO class constructor may
+  # assign its own fields, but actor state must still use handle_state.
+  actor_body=$(awk '/^define (pub )?actor / { inside=1 } inside { print } /^end[[:space:]]*$/ { inside=0 }' "$actor")
+  [ -n "$actor_body" ] || { echo "MISSING_ACTOR_DECLARATION: $actor" >&2; exit 1; }
+  if printf '%s\n' "$actor_body" | grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' |
        grep -Ev 'self\.(send|end|handle_state|handle_operation|apply_epoch)\('; then
     echo "DIRECT_ACTOR_FIELD_ACCESS: $actor" >&2
     exit 1
   fi
-  if grep -Eq 'self\.[A-Za-z_][A-Za-z_0-9]*[[:space:]]*=' "$actor"; then
+  if printf '%s\n' "$actor_body" | grep -Eq 'self\.[A-Za-z_][A-Za-z_0-9]*[[:space:]]*='; then
     echo "DIRECT_ACTOR_FIELD_WRITE: $actor" >&2
     exit 1
   fi
