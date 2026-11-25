@@ -9,31 +9,32 @@
 } while (0)
 
 int main(void) {
+  OresBrowserConfig config = {0};
+  if (ores_browser_validate_config_v1(&config)) return 10;
+  config.struct_size = sizeof(config);
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  /* Check startup admission without allowing a malformed record to
+     influence tenant/session selection in a future Oreslang backend. */
+  if (!ores_browser_validate_config_v1(&config)) return 3;
+  config.private_session = 1u;
+  if (!ores_browser_validate_config_v1(&config)) return 4;
+  config.private_session = 2u;
+  if (ores_browser_validate_config_v1(&config)) return 5;
+  config.private_session = 0u;
+  config.reserved = 1u;
+  if (ores_browser_validate_config_v1(&config)) return 6;
+  config.reserved = 0u;
+  config.abi_version++;
+  if (ores_browser_validate_config_v1(&config)) return 7;
+  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
+  config.struct_size--;
+  if (ores_browser_validate_config_v1(&config)) return 8;
+  if (ores_browser_validate_config_v1(NULL)) return 9;
+
   OresBrowserSnapshot *snapshot =
       (OresBrowserSnapshot *)calloc(1u, sizeof(OresBrowserSnapshot));
   OresBrowserCommand command = {0};
-  OresBrowserConfig config = {0};
   if (!snapshot) return 2;
-  EXPECT(!ores_browser_validate_config_v1(NULL), "null-config");
-  EXPECT(!ores_browser_validate_config_v1(&config), "zero-config");
-  config.struct_size = sizeof(config);
-  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
-  EXPECT(ores_browser_validate_config_v1(&config), "valid-normal-config");
-  config.private_session = 1u;
-  EXPECT(ores_browser_validate_config_v1(&config), "valid-private-config");
-  config.private_session = 2u;
-  EXPECT(!ores_browser_validate_config_v1(&config), "nonboolean-private");
-  config.private_session = 0u;
-  config.reserved = 1u;
-  EXPECT(!ores_browser_validate_config_v1(&config), "smuggled-config-reserved");
-  config.reserved = 0u;
-  config.struct_size = 0u;
-  EXPECT(!ores_browser_validate_config_v1(&config), "config-size");
-  config.struct_size = sizeof(config);
-  config.abi_version = ORES_BROWSER_UI_ABI_VERSION + 1u;
-  EXPECT(!ores_browser_validate_config_v1(&config), "config-version");
-  config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
-  EXPECT(ores_browser_validate_config_v1(&config), "restored-config");
   snapshot->struct_size = sizeof(*snapshot);
   snapshot->abi_version = ORES_BROWSER_UI_ABI_VERSION;
   snapshot->revision = 7u;
@@ -86,6 +87,18 @@ int main(void) {
   command.struct_size = sizeof(command);
   command.operation = ORES_BROWSER_CMD_NEW_TAB;
   EXPECT(ores_browser_validate_command_v1(&command), "new-tab");
+  memcpy(command.url, "https://a.test/", 16u);
+  EXPECT(ores_browser_validate_command_v1(&command), "new-tab-optional-url");
+  command.url[200] = 'X';
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-nonzero-padding");
+  command.url[200] = 0;
+  memset(command.url, 'X', sizeof(command.url));
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-unterminated");
+  memset(command.url, 0, sizeof(command.url));
+  EXPECT(ores_browser_validate_command_v1(&command), "restored-empty-new-tab-url");
+  command.url[0] = (char)0x80;
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-invalid-utf8");
+  command.url[0] = 0;
   command.tab_id = 1u;
   EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-smuggle");
   command.tab_id = 0u;
@@ -101,6 +114,19 @@ int main(void) {
   EXPECT(!ores_browser_validate_command_v1(&command), "unexpected-url");
   memset(command.url, 0, sizeof(command.url));
   EXPECT(ores_browser_validate_command_v1(&command), "valid-close");
+  command.operation = ORES_BROWSER_CMD_NEXT_TAB;
+  command.tab_id = 0u; command.tab_generation = 0u;
+  EXPECT(ores_browser_validate_command_v1(&command), "session-scoped-next");
+  command.tab_id = 41u; command.tab_generation = 5u;
+  EXPECT(!ores_browser_validate_command_v1(&command), "next-tab-smuggle");
+  command.operation = ORES_BROWSER_CMD_PREVIOUS_TAB;
+  command.tab_id = 0u; command.tab_generation = 0u;
+  EXPECT(ores_browser_validate_command_v1(&command), "session-scoped-previous");
+  command.tab_generation = 1u;
+  EXPECT(!ores_browser_validate_command_v1(&command), "previous-generation-smuggle");
+  command.tab_generation = 0u;
+  command.operation = ORES_BROWSER_CMD_SELECT_TAB;
+  EXPECT(!ores_browser_validate_command_v1(&command), "missing-tab-capability");
   command.operation = 999u;
   EXPECT(!ores_browser_validate_command_v1(&command), "unknown-op");
 

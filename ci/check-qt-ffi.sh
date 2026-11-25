@@ -14,6 +14,9 @@ c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
 "$tmp/abi-cpp"
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/chrome_url_adversarial.c -o "$tmp/abi-chrome-url"
+"$tmp/abi-chrome-url"
 "$tmp/abi-wire"
 # Always-on Release-mode anti-spoofing gate: all 65536 UTF-16 code units.
 # This is a portable host contract test, not a compiled Qt event loop.
@@ -73,6 +76,10 @@ grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
 grep -Fq 'ores_browser_validate_snapshot_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
+grep -Fq 'ores_browser_validate_config_v1(&config)' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_NEXT_TAB);' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_PREVIOUS_TAB);' desktop/qt/UiBridge.cpp
+grep -Fq 'ores_browser_chrome_url_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
