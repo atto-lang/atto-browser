@@ -3,8 +3,8 @@
 // production actor scheduler, lease-bearing methods, or arbitrary JS guests.
 import {MAX_WASM_BYTES, fixed_memory_pages} from './wasm-profile.mjs';
 import {read_bounded} from './wasm-tenant.mjs';
+import {assert_receiver_identifier} from './protocol.mjs';
 
-const IDENT=/^[A-Za-z_][A-Za-z_0-9]*$/;
 const SHA=/^[0-9a-f]{64}$/;
 const MAX_I64=(1n<<63n)-1n,MIN_I64=-(1n<<63n);
 
@@ -23,7 +23,7 @@ function require_args(args) {
 }
 
 export async function open_receiver_tenant(entry, owner, expected_sha256) {
-  if(typeof owner!=='string' || !IDENT.test(owner))throw new Error('E_RECEIVER_OWNER');
+  assert_receiver_identifier(owner,'E_RECEIVER_OWNER');
   if(typeof expected_sha256!=='string' || !SHA.test(expected_sha256))
     throw new Error('E_RECEIVER_DIGEST');
   const response=await fetch(entry,{credentials:'omit',mode:'same-origin',redirect:'error'});
@@ -50,11 +50,24 @@ export async function open_receiver_tenant(entry, owner, expected_sha256) {
   if(methods.length<1 || methods.length>32 ||
      !methods.some(e=>e.name.startsWith('atto.receiver.'+owner+'.')))
     throw new Error('E_RECEIVER_ABI');
-  if(exports.some(e=>e.kind!=='function' && e.name!=='panic_code') ||
+  const binds=exports.filter(e=>e.name.startsWith('atto.bind.'));
+  // Do not admit arbitrary extra guest exports merely because required names
+  // exist. Exact export shape is part of the separately pinned compiler ABI.
+  if(binds.length<1 || binds.length>32 || exports.length>66 ||
+     exports.length!==binds.length+methods.length+2 ||
+     exports.some(e=>e.kind!=='function' && e.name!=='panic_code') ||
+     exports.some(e=>e.name!=='panic_code' && e.name!=='atto.actor_close' &&
+       !e.name.startsWith('atto.bind.') && !e.name.startsWith('atto.receiver.')) ||
      methods.some(e=>e.kind!=='function' ||
        !/^atto\.receiver\.[A-Za-z_][A-Za-z_0-9]*\.[A-Za-z_][A-Za-z_0-9]*\.[0-8]$/.test(e.name)) ||
-     exports.some(e=>e.name.startsWith('atto.bind.') &&
-       (e.kind!=='function' || !IDENT.test(e.name.slice('atto.bind.'.length)))))
+     binds.some(e=>e.kind!=='function' ||
+       !/^[A-Za-z_][A-Za-z_0-9]*$/.test(e.name.slice('atto.bind.'.length)) ||
+       e.name.slice('atto.bind.'.length).length>256))
+    throw new Error('E_RECEIVER_ABI');
+  const bound_owners=new Set(binds.map(e=>e.name.slice('atto.bind.'.length)));
+  if(!bound_owners.has(owner) ||
+     methods.some(e=>!bound_owners.has(e.name.split('.')[2]) ||
+       e.name.split('.')[2].length>256 || e.name.split('.')[3].length>256))
     throw new Error('E_RECEIVER_ABI');
 
   // Module was SHA-pinned and verified before instantiation. This preview has
@@ -74,7 +87,7 @@ export async function open_receiver_tenant(entry, owner, expected_sha256) {
   return Object.freeze({
     on_receiver(method,args) {
       if(closed)throw new Error('E_RECEIVER_CLOSED');
-      if(typeof method!=='string' || !IDENT.test(method))throw new Error('E_RECEIVER_METHOD');
+      assert_receiver_identifier(method,'E_RECEIVER_METHOD');
       require_args(args);
       const fn=inst['atto.receiver.'+owner+'.'+method+'.'+args.length];
       if(typeof fn!=='function')throw new Error('E_RECEIVER_METHOD');

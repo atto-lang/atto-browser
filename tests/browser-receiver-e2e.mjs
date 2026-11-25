@@ -11,7 +11,18 @@ import { tmpdir } from 'node:os';
 const fixtures=process.env.ATTO_BROWSER_FIXTURE_DIR;
 if(!fixtures)throw new Error('E_FIXTURES_REQUIRED: compile actual AttoLang guests first');
 const root=new URL('../',import.meta.url);
-const sha256=createHash('sha256').update(await readFile(join(fixtures,'receiver-worker.wasm'))).digest('hex');
+const receiver_bytes=await readFile(join(fixtures,'receiver-worker.wasm'));
+const sha256=createHash('sha256').update(receiver_bytes).digest('hex');
+// Deliberately mutate one *export name* without changing byte lengths or
+// Wasm validity. Its independently pinned hash is correct, yet the module
+// must still fail the receiver export allowlist before instantiation.
+const mutant=Buffer.from(receiver_bytes);
+const export_name=Buffer.from('atto.bind.Other');
+const location=mutant.indexOf(export_name);
+assert.ok(location>=0,'compiled fixture exports an Other actor binder');
+Buffer.from('atto.binD.Other').copy(mutant,location);
+assert.equal(WebAssembly.validate(mutant),true,'adversarial export mutant stays valid Wasm');
+const extraSha=createHash('sha256').update(mutant).digest('hex');
 // Valid 42-byte Wasm module whose main() loops forever; validates the
 // worker watchdog without relying on a JS busy-loop or mock worker.
 const hung_guest=Buffer.from('0061736d010000000105016000017e03020100070801046d61696e00000a0b01090003400c000b42000b','hex');
@@ -31,6 +42,8 @@ const files=new Map([
   ['/fixtures/hung.wasm',[hung_guest,'application/wasm']],
   ['/fixtures/receiver-worker.wasm',[new URL('file://'+join(fixtures,'receiver-worker.wasm')),'application/wasm']],
   ['/fixtures/receiver-pin.mjs',[Buffer.from('export const sha256='+JSON.stringify(sha256)+';'),'text/javascript; charset=utf-8']],
+  ['/fixtures/receiver-extra.wasm',[mutant,'application/wasm']],
+  ['/fixtures/receiver-extra-pin.mjs',[Buffer.from('export const extraSha='+JSON.stringify(extraSha)+';'),'text/javascript; charset=utf-8']],
 ]);
 const requests=[];
 const server=createServer(async(req,res)=>{
