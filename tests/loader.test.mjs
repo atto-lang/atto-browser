@@ -131,3 +131,60 @@ test("forged ArrayBuffer prototype without native byte storage is never accepted
   assert.equal(forged instanceof ArrayBuffer,true);
   assert.throws(() => inspectWasmBytes(forged), /expected a Wasm ArrayBuffer/);
 });
+
+test("capability grants and clock provider are sealed at loader admission",async()=>{
+ const requested=["clock"],granted=["clock"],host={clockMs:()=>42};
+ const rt=await loadOreslangWasm(bytes,{requestedCapabilities:requested,
+   grantedCapabilities:granted,host});
+ requested.length=0;
+ granted.length=0;
+ host.clockMs=()=>999;
+ assert.equal(rt.instance.exports.run_clock(),42);
+ assert.equal(rt.hostClockCalls,1);
+});
+
+test("an inherited or own fake iterator cannot rewrite capability authority",async()=>{
+ const requested=["clock"],granted=["clock"];
+ let iteratorReads=0,entryGetterReads=0;
+ for(const value of [requested,granted]){
+   Object.defineProperty(value,Symbol.iterator,{get(){
+     iteratorReads++;throw Error("untrusted iterator");
+   }});
+   Object.defineProperty(value,"includes",{value:()=>false});
+ }
+ const rt=await loadOreslangWasm(bytes,{requestedCapabilities:requested,
+   grantedCapabilities:granted,host:{clockMs:()=>42}});
+ assert.equal(rt.instance.exports.run_clock(),42);
+ assert.equal(iteratorReads,0);
+ const forged=["clock"];
+ Object.defineProperty(forged,"0",{get(){entryGetterReads++;return "clock";}});
+ await assert.rejects(()=>loadOreslangWasm(bytes,{requestedCapabilities:forged,
+    grantedCapabilities:["clock"],host:{clockMs:()=>42}}),/unique list/);
+ assert.equal(entryGetterReads,0);
+});
+
+test("unrequested clock providers are not inspected during admission",async()=>{
+ let getterCalls=0;
+ const host={};
+ Object.defineProperty(host,"clockMs",{get(){
+   getterCalls++;throw Error("unrequested provider getter");
+ }});
+ const rt=await loadOreslangWasm(bytes,{requestedCapabilities:[],
+   grantedCapabilities:[],host});
+ assert.equal(getterCalls,0);
+ assert.throws(()=>rt.instance.exports.run_clock(),/clock capability denied/);
+});
+
+
+test("requested clock accessor and inherited providers are denied without execution",async()=>{
+ let reads=0;
+ const accessor={};
+ Object.defineProperty(accessor,"clockMs",{get(){reads++;throw Error("accessor executed");}});
+ await assert.rejects(()=>loadOreslangWasm(bytes,{requestedCapabilities:["clock"],
+   grantedCapabilities:["clock"],host:accessor}),/clock requested but no host.clockMs provider/);
+ assert.equal(reads,0);
+ const inherited=Object.create({clockMs:()=>42});
+ await assert.rejects(()=>loadOreslangWasm(bytes,{requestedCapabilities:["clock"],
+   grantedCapabilities:["clock"],host:inherited}),/clock requested but no host.clockMs provider/);
+ assert.equal(reads,0);
+});
