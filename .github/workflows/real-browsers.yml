@@ -1,0 +1,29 @@
+name: Real Chromium and Firefox Worker E2E
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  real-browsers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.1'
+      - name: Record exact checked-out revision (not a passed-suite receipt)
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          printf 'CHECKOUT_SHA=%s\nNODE_VERSION=%s\n' "$GITHUB_SHA" "$(node --version)"
+      - name: Verify Node unit and isolated-worker regressions
+        run: npm test
+      - name: Install pinned Playwright harness
+        run: npm install --no-save --package-lock=false playwright@1.56.1
+      - name: Install real Chromium and Firefox with OS dependencies
+        run: npx playwright install --with-deps chromium firefox
+      - name: Run real browser module Worker integration
+        run: npm run test:browser

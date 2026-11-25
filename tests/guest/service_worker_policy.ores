@@ -1,0 +1,81 @@
+import fnc {may_register_service_worker, may_dispatch_worker_fetch,
+            may_promote_waiting_worker, may_wake_worker_for_event,
+            may_receive_push} from "../../src/workers/service_worker_policy.ores";
+
+pub routine main(): void {
+  if !may_register_service_worker(1, 1, 10, 10, 10, 30, 30,
+                                  true, true, true, true); do
+    stdio.stdout.write("FAIL:register"); return;
+  fi
+  if may_register_service_worker(1, 1, 10, 11, 10, 30, 30,
+                                 true, true, true, true); do
+    stdio.stdout.write("FAIL:cross-origin-script"); return;
+  fi
+  if may_register_service_worker(1, 1, 10, 10, 10, 30, 31,
+                                 true, true, true, true); do
+    stdio.stdout.write("FAIL:partition-register"); return;
+  fi
+  if may_register_service_worker(1, 1, 10, 10, 10, 30, 30,
+                                 false, true, true, true); do
+    stdio.stdout.write("FAIL:insecure-register"); return;
+  fi
+  if may_register_service_worker(1, 1, 10, 10, 10, 30, 30,
+                                 true, true, false, true); do
+    stdio.stdout.write("FAIL:bad-scope"); return;
+  fi
+  if !may_dispatch_worker_fetch(1, 1, 30, 30, 10, 10, true,
+                                 4, 4, true, true); do
+    stdio.stdout.write("FAIL:fetch"); return;
+  fi
+  if may_dispatch_worker_fetch(1, 1, 31, 30, 10, 10, true,
+                                4, 4, true, true); do
+    stdio.stdout.write("FAIL:fetch-partition"); return;
+  fi
+  if may_dispatch_worker_fetch(1, 1, 30, 30, 10, 10, true,
+                                3, 4, true, true); do
+    stdio.stdout.write("FAIL:fetch-stale-generation"); return;
+  fi
+  if may_dispatch_worker_fetch(1, 1, 30, 30, 10, 10, false,
+                                4, 4, true, true); do
+    stdio.stdout.write("FAIL:fetch-scope"); return;
+  fi
+  if !may_promote_waiting_worker(1, 1, 30, 30, 4, 5,
+                                 true, true, false, true); do
+    stdio.stdout.write("FAIL:promote-drained"); return;
+  fi
+  if !may_promote_waiting_worker(1, 1, 30, 30, 4, 5,
+                                 true, false, true, true); do
+    stdio.stdout.write("FAIL:skip-waiting"); return;
+  fi
+  if may_promote_waiting_worker(1, 1, 30, 30, 4, 5,
+                                true, false, false, true); do
+    stdio.stdout.write("FAIL:unapproved-promote"); return;
+  fi
+  if may_promote_waiting_worker(1, 1, 30, 31, 4, 5,
+                                true, true, false, true); do
+    stdio.stdout.write("FAIL:update-partition"); return;
+  fi
+  if !may_wake_worker_for_event(1, 1, 30, 30, 4, 4,
+                                1, 8, true, true, true); do
+    stdio.stdout.write("FAIL:wake"); return;
+  fi
+  if may_wake_worker_for_event(1, 1, 30, 30, 4, 4,
+                               8, 8, true, true, true); do
+    stdio.stdout.write("FAIL:queue-overflow"); return;
+  fi
+  if may_wake_worker_for_event(1, 1, 30, 30, 4, 4,
+                               1, 8, true, true, false); do
+    stdio.stdout.write("FAIL:private-session-closed"); return;
+  fi
+  if !may_receive_push(1, 1, 30, 30, 4, 4, true, true, true); do
+    stdio.stdout.write("FAIL:push"); return;
+  fi
+  if may_receive_push(1, 1, 30, 30, 3, 4, true, true, true); do
+    stdio.stdout.write("FAIL:stale-subscription"); return;
+  fi
+  if may_receive_push(1, 1, 30, 30, 4, 4, false, true, true); do
+    stdio.stdout.write("FAIL:invalid-subscription"); return;
+  fi
+  stdio.stdout.write("browser:service-worker-policy-ok");
+  return;
+}
