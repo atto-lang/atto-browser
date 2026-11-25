@@ -83,6 +83,23 @@ typedef struct OresBrowserSnapshot {
 
 /* Called exclusively on a dedicated non-UI bridge thread.
  * Returned result must be OresBrowserStatus, never an arbitrary int.
+ *
+ * Proposed native lifecycle acceptance contract (NOT yet implemented):
+ * - OPEN validates the exact config size, version, boolean private_session,
+ *   zero reserved field and trusted host admission before allocating state.
+ * - Every failed OPEN returns a defined OresBrowserStatus and writes NULL to
+ *   a valid out_browser output slot (no partially live capability).
+ * - Every successful OPEN returns an opaque, independently owned session
+ *   capability; two simultaneously open sessions MUST NOT alias.
+ * - DISPATCH and SNAPSHOT validate the live session capability and tab
+ *   generations before accessing actor-owned state. Rejected operations do
+ *   not advance the observable state revision.
+ * - CLOSE retires the session and all child tabs. The bridge calls it once
+ *   per successful OPEN. No raw actor pointer or guest allocator address
+ *   may be exposed through this C boundary.
+ * - No security decision is delegated to Qt. Authenticated tenant/profile
+ *   admission requires further runtime work, not merely this value record.
+ *
  * Exporter implementation and Oreslang actor message pump pending.
  */
 uint32_t ores_browser_abi_version(void);

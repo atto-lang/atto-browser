@@ -17,6 +17,18 @@ int main() {
     OresBrowserCommand cmd{};
     cmd.struct_size = sizeof(cmd);
     cmd.operation = ORES_BROWSER_CMD_NEW_TAB;
-    return config.abi_version == 1u &&
-           ores_browser_validate_command_v1(&cmd) ? 0 : 1;
+    if (!ores_browser_validate_config_v1(&config) ||
+        !ores_browser_validate_command_v1(&cmd))
+        return 1;
+    cmd.url[0] = 'h';
+    cmd.url[1] = 0;
+    if (!ores_browser_validate_command_v1(&cmd))
+        return 2; // Optional initial URL for NEW_TAB.
+    cmd.url[100] = 'X';
+    if (ores_browser_validate_command_v1(&cmd))
+        return 3; // Noncanonical padding must fail.
+    config.reserved = 1u;
+    if (ores_browser_validate_config_v1(&config))
+        return 4;
+    return 0;
 }

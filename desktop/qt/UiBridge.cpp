@@ -40,7 +40,9 @@ bool safeChromeUrl(const QString &value) {
         const ushort u = c.unicode();
         if (ores_browser_chrome_disallowed_v1(u)) return false;
     }
-    return true;
+    const QByteArray bytes = value.toUtf8();
+    return bytes.size() < ORES_BROWSER_URL_BYTES &&
+           ores_browser_chrome_url_v1(bytes.constData(), static_cast<size_t>(bytes.size() + 1));
 }
 // Webpage titles are never authority. Replace dangerous controls for
 // display rather than allowing untrusted page content to kill the browser.
@@ -99,6 +101,10 @@ void BackendWorker::start() {
     config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
     // Privileged Oreslang supervisor chooses tenant and profile.
     config.private_session = 0;
+    if (!ores_browser_validate_config_v1(&config)) {
+        failClosed(QStringLiteral("Invalid Oreslang startup configuration"));
+        return;
+    }
     const int32_t status = open_(&config, &handle_);
     if (status != ORES_BROWSER_OK || !handle_) {
         failClosed(QStringLiteral("Oreslang supervisor refused startup"));
@@ -144,7 +150,9 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     OresBrowserCommand command{};
     command.struct_size = sizeof(command);
     command.operation = op;
-    if (op != ORES_BROWSER_CMD_NEW_TAB) {
+    if (op != ORES_BROWSER_CMD_NEW_TAB &&
+        op != ORES_BROWSER_CMD_NEXT_TAB &&
+        op != ORES_BROWSER_CMD_PREVIOUS_TAB) {
         bool id_ok = false, gen_ok = false;
         command.tab_id = id.toULongLong(&id_ok, 10);
         command.tab_generation = generation.toULongLong(&gen_ok, 10);
@@ -304,7 +312,7 @@ void UiBridge::start() {
         // ACK only after the UI has consumed the snapshot, and only on the
         // worker thread. A frozen UI retains one credit indefinitely.
         auto *worker = worker_;
-        if (!QMetaObject::invokeMethod(worker, [worker, revision] {
+        if (!worker || !QMetaObject::invokeMethod(worker, [worker, revision] {
                 worker->acknowledgeSnapshot(revision);
             }, Qt::QueuedConnection)) {
             connected_ = false;
@@ -395,9 +403,9 @@ void UiBridge::reload() {
 }
 void UiBridge::nextTab() {
     if (!activeId_.isEmpty())
-        submit(ORES_BROWSER_CMD_NEXT_TAB, activeId_, activeGeneration_);
+        submit(ORES_BROWSER_CMD_NEXT_TAB);
 }
 void UiBridge::previousTab() {
     if (!activeId_.isEmpty())
-        submit(ORES_BROWSER_CMD_PREVIOUS_TAB, activeId_, activeGeneration_);
+        submit(ORES_BROWSER_CMD_PREVIOUS_TAB);
 }
