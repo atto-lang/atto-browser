@@ -1,0 +1,71 @@
+import fnc {may_reuse_renderer, may_read_dom, may_post_message,
+            may_deliver_renderer_ipc, may_commit_navigation}
+    from "../../src/isolation/policy.ores";
+
+pub routine main(): void {
+  if !may_reuse_renderer(1, 10, 1, 10, 7, true, true); do
+    stdio.stdout.write("FAIL:same-origin"); return;
+  fi
+  if may_reuse_renderer(2, 10, 1, 10, 7, true, true); do
+    stdio.stdout.write("FAIL:cross-tenant"); return;
+  fi
+  if may_reuse_renderer(1, 11, 1, 10, 7, true, true); do
+    stdio.stdout.write("FAIL:cross-origin"); return;
+  fi
+  if may_reuse_renderer(1, 10, 1, 10, 7, true, false); do
+    stdio.stdout.write("FAIL:unsandboxed"); return;
+  fi
+  if may_reuse_renderer(1, 10, 1, 10, 0, true, true); do
+    stdio.stdout.write("FAIL:bad-generation"); return;
+  fi
+  if may_reuse_renderer(1, 10, 1, 10, 7, false, true); do
+    stdio.stdout.write("FAIL:crashed-renderer"); return;
+  fi
+  if !may_read_dom(1, 10, 1, 10, 4, 4, true); do
+    stdio.stdout.write("FAIL:same-origin-dom"); return;
+  fi
+  if may_read_dom(1, 11, 1, 10, 4, 4, true); do
+    stdio.stdout.write("FAIL:cross-origin-dom"); return;
+  fi
+  if may_read_dom(1, 10, 1, 10, 3, 4, true); do
+    stdio.stdout.write("FAIL:stale-document"); return;
+  fi
+  if may_read_dom(1, 10, 2, 10, 4, 4, true); do
+    stdio.stdout.write("FAIL:foreign-document"); return;
+  fi
+  if !may_post_message(1, 1, 11, 11, 4, 4, true, true); do
+    stdio.stdout.write("FAIL:targeted-message"); return;
+  fi
+  if may_post_message(1, 2, 11, 11, 4, 4, true, true); do
+    stdio.stdout.write("FAIL:cross-tenant-message"); return;
+  fi
+  if may_post_message(1, 1, 10, 11, 4, 4, true, true); do
+    stdio.stdout.write("FAIL:wrong-target-origin"); return;
+  fi
+  if may_post_message(1, 1, 11, 11, 3, 4, true, true); do
+    stdio.stdout.write("FAIL:stale-target"); return;
+  fi
+  if !may_deliver_renderer_ipc(1, 1, 10, 10, 7, 7, 4, 4, true, true); do
+    stdio.stdout.write("FAIL:current-ipc"); return;
+  fi
+  if may_deliver_renderer_ipc(1, 1, 10, 10, 6, 7, 4, 4, true, true); do
+    stdio.stdout.write("FAIL:stale-process"); return;
+  fi
+  if may_deliver_renderer_ipc(1, 1, 10, 10, 7, 7, 3, 4, true, true); do
+    stdio.stdout.write("FAIL:stale-frame"); return;
+  fi
+  if !may_commit_navigation(1, 1, 8, 8, 5, 5, true, true); do
+    stdio.stdout.write("FAIL:current-navigation"); return;
+  fi
+  if may_commit_navigation(1, 1, 8, 8, 4, 5, true, true); do
+    stdio.stdout.write("FAIL:stale-navigation"); return;
+  fi
+  if may_commit_navigation(1, 2, 8, 8, 5, 5, true, true); do
+    stdio.stdout.write("FAIL:cross-tenant-navigation"); return;
+  fi
+  if may_commit_navigation(1, 1, 8, 8, 5, 5, false, true); do
+    stdio.stdout.write("FAIL:cancelled-navigation"); return;
+  fi
+  stdio.stdout.write("browser:isolation-policy-ok");
+  return;
+}
