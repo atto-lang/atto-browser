@@ -3,10 +3,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f ci/native-cases.txt ]
-[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 15 ]
+[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 14 ]
 for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
     src/browser/renderer_supervisor.ores src/browser/browser_supervisor.ores \
-    src/browser/session_lifecycle.ores src/browser/window_frame_graph.ores src/browser/frame_routing_policy.ores \
+    src/browser/window_frame_graph.ores src/browser/frame_routing_policy.ores \
     src/browser/tab_epoch.ores \
     src/desktop/tab_policy.ores src/desktop/ui_dispatch_policy.ores \
     src/desktop/tab_session.ores \
@@ -55,7 +55,7 @@ grep -Fq 'FAIL:untrusted-hosted-subdomains' tests/guest/site_tenant_policy.ores
 grep -Fq 'FAIL:sibling-origin-read' tests/guest/site_tenant_policy.ores
 # These source checks are structural only; compilation is a separate gate.
 for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
-    src/browser/session_lifecycle.ores src/browser/window_frame_graph.ores \
+    src/browser/window_frame_graph.ores \
     src/browser/renderer_supervisor.ores src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores src/workers/lifecycle.ores; do
   [ "$(grep -Ec '^  state \{' "$actor")" -eq 1 ] || {
@@ -80,9 +80,6 @@ done
 grep -Fq 'FAIL:stale-child-surface' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:cross-tab-damage' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:stale-tab-id' src/browser/browser_supervisor.ores
-grep -Fq 'FAIL:stale-session-close' src/browser/session_lifecycle.ores
-grep -Fq 'FAIL:cross-session-retirement' src/browser/session_lifecycle.ores
-grep -Fq 'FAIL:recycled-session-generation' src/browser/session_lifecycle.ores
 grep -Fq 'FAIL:nonrecycled-tab-id' src/browser/browser_supervisor.ores
 grep -Fq 'define actor TabEpochActor' src/browser/tab_epoch.ores
 grep -Fq 'define actor TabSessionActor' src/desktop/tab_session.ores

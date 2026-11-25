@@ -15,6 +15,7 @@
     "test:browser": "node tests/real-browser-e2e.mjs",
     "test:browser-tenants": "node tests/browser-tenants-e2e.mjs",
     "test:browser-js": "node tests/browser-js-worker-e2e.mjs",
-    "test:browser-receiver": "node tests/browser-receiver-e2e.mjs"
+    "test:browser-receiver": "node tests/browser-receiver-e2e.mjs",
+    "test:browser-stateful": "node tests/browser-stateful-e2e.mjs"
   }
 }
