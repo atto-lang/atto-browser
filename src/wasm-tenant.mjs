@@ -1,7 +1,7 @@
 import { MAX_ACTORS_PER_TENANT, MAX_MAIL_PER_ACTOR, MAX_STDOUT_BYTES } from './protocol.mjs';
 import { fixed_memory_pages, actor_names, MAX_WASM_BYTES } from './wasm-profile.mjs';
 
-async function read_bounded(response) {
+export async function read_bounded(response) {
   const declared=Number(response.headers?.get?.('content-length'));
   if (Number.isFinite(declared) && declared>MAX_WASM_BYTES) throw new Error('E_WASM_SIZE');
   if (response.body?.getReader) {

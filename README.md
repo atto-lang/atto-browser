@@ -137,3 +137,47 @@ The supervisor, not guest Wasm, issues monotonic correlation IDs and structured 
 Statuses are **`processed`** (receiver handler returned successfully), **`rejected`** (no delivery dispatched) and **`unknown`** (delivery was dispatched but crashed, timed out or could not be confirmed). This is a **processing acknowledgment**, not exactly-once semantics. Do **not automatically retry `unknown`**—the receiver may have applied the message. Earlier processed messages in a batch remain processed even when a later message fails. On remote-send failure the client rejects with the existing `Error.message` and an additional validated `error.failure = {protocol,code,outcome,receipt,prior_receipts}`. The `prior_receipts` list is bounded to 16.
 
 The current `remote_actor(...).send(...)` guest import still returns `void`, and the compiler still rejects `await`. This feature intentionally stops at **host-visible typed receipts** until proper Wasm continuation frames and a genuine guest-visible `Result<int,string>` can be implemented. Transport buffer ownership, no duplicate acknowledgments, restart fencing and unknown processing outcomes remain separate correctness obligations.
+
+## Experimental compiled receiver tenant workers (stacked on atto-source.rs #144)
+
+The new `backend:'receiver'` path executes **only** an opt-in scalar
+`attoc --receiver-instance-preview` Wasm module. It does not activate the
+production `mtd` compiler or actor-state leases.
+
+Build a receiver Wasm fixture using the exact Rust compiler tree:
+
+```sh
+attoc --receiver-instance-preview tests/fixtures/receiver-worker.atto -o receiver-worker.wasm
+sha256sum receiver-worker.wasm
+```
+
+Pass the resulting **build-pinned** 64-character SHA-256 in the app-authorized
+`spawn` request, not a checksum calculated from a remote untrusted download:
+
+```js
+const actor=await client.spawn('my_tenant',{
+  backend:'receiver',
+  entry:'/guests/receiver-worker.wasm',
+  owner:'Worker',
+  sha256:RELEASE_MANIFEST_SHA256
+});
+const answer=await client.call_receiver(actor,'double',21n); // answer.value === '42'
+```
+
+The supervisor authorizes calls using its existing tenant capability and
+monotonic generation, before forwarding a bounded method name and signed i64
+arguments. Only the **tenant worker** receives and holds the Wasm receiver
+binding token. Wrong-method attempts are rejected before guest execution.
+Checked guest overflow emits a typed CONTROL notice before the tenant is
+retired/restarted, fencing old handles. Healthy siblings survive.
+
+Each tenant worker contains **one** receiver actor Wasm instance in this
+milestone. The adapter does not offer arbitrary program entry, mailbox
+routing, actor-state mutation or an actor-owned heap. `on_control` events are
+the existing browser supervisor's logical priority envelope, not a physical
+hard-real-time priority lane. A trusted application must supply the tenant
+authority and pinned artifact digest. Same-origin workers do not sandbox
+hostile same-origin JavaScript. State/lease-bearing `mtd` stays rejected.
+
+For executed real Chromium coverage:
+`ATTO_BROWSER_FIXTURE_DIR=/path/to/compiled/guests npm run test:browser-receiver`.
