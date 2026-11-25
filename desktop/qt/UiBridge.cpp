@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QDebug>
 #include "ores_browser_wire_validate_v1.h"
+#include "ores_browser_chrome_text_v1.h"
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -33,26 +34,22 @@ bool validStatus(int32_t status) {
     return status >= ORES_BROWSER_OK && status <= ORES_BROWSER_INTERNAL;
 }
 // Security-critical browser-chrome URL text may not contain direction
-// overrides, isolate controls, or invisible ASCII/C1 control characters.
+// controls, invisible formatting code points, or C0/C1 characters.
 bool safeChromeUrl(const QString &value) {
-    // Match the C ABI chrome-URL gate exactly, including bidi marks that
-    // would otherwise render as invisible address-bar text.
+    for (QChar c : value) {
+        const ushort u = c.unicode();
+        if (ores_browser_chrome_disallowed_v1(u)) return false;
+    }
     const QByteArray bytes = value.toUtf8();
     return bytes.size() < ORES_BROWSER_URL_BYTES &&
-           ores_browser_chrome_url_v1(bytes.constData(),
-                                     static_cast<size_t>(bytes.size() + 1));
+           ores_browser_chrome_url_v1(bytes.constData(), static_cast<size_t>(bytes.size() + 1));
 }
 // Webpage titles are never authority. Replace dangerous controls for
 // display rather than allowing untrusted page content to kill the browser.
 QString safeDisplayTitle(QString value) {
     for (qsizetype i = 0; i < value.size(); ++i) {
         const ushort u = value.at(i).unicode();
-        if (u < 0x20u || (u >= 0x7fu && u <= 0x9fu) ||
-            u == 0x00adu || u == 0x034fu || u == 0x061cu ||
-            u == 0x180eu || u == 0x200bu || u == 0x200eu ||
-            u == 0x200fu || (u >= 0x2028u && u <= 0x202eu) ||
-            u == 0x2060u || (u >= 0x2066u && u <= 0x206fu) ||
-            u == 0xfeffu) {
+        if (ores_browser_chrome_disallowed_v1(u)) {
             value[i] = QChar(0xfffdu);
         }
     }
@@ -104,8 +101,6 @@ void BackendWorker::start() {
     config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
     // Privileged Oreslang supervisor chooses tenant and profile.
     config.private_session = 0;
-    // The trusted backend must repeat these checks; this is a frontend
-    // fail-closed preflight for the ABI record, not an authorization grant.
     if (!ores_browser_validate_config_v1(&config)) {
         failClosed(QStringLiteral("Invalid Oreslang startup configuration"));
         return;
@@ -140,6 +135,7 @@ void BackendWorker::shutdown() {
     have_revision_ = false;
     last_revision_ = 0;
     last_wire_.clear();
+    view_gate_.acknowledge();
 }
 void BackendWorker::submit(uint32_t op, const QString &id,
                            const QString &generation, const QString &url) {
@@ -190,8 +186,14 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     }
     readSnapshot(); // Backend, not Qt, determines the resulting state.
 }
+void BackendWorker::acknowledgeSnapshot() {
+    // Always executes in the worker's own Qt thread via a queued call.
+    // No acknowledgement means the GUI has not consumed the last view.
+    if (!view_gate_.acknowledge()) return;
+    readSnapshot();  // Deliver the latest backend revision, if it changed.
+}
 void BackendWorker::readSnapshot() {
-    if (!handle_ || !snapshot_) return;
+    if (!handle_ || !snapshot_ || view_gate_.pending()) return;
     auto view = std::make_unique<OresBrowserSnapshot>();
     view->struct_size = sizeof(*view);
     view->abi_version = ORES_BROWSER_UI_ABI_VERSION;
@@ -259,6 +261,10 @@ void BackendWorker::readSnapshot() {
                             static_cast<qsizetype>(sizeof(*view)));
     last_revision_ = view->revision;
     have_revision_ = true;
+    if (!view_gate_.tryReserve()) {
+        failClosed(QStringLiteral("Duplicate pending UI snapshot"));
+        return;
+    }
     emit ready(tabs, activeId, activeGeneration, activeUrl, canBack, canForward);
 }
 
@@ -298,7 +304,16 @@ void UiBridge::start() {
         status_ = QStringLiteral("Connected to Oreslang backend");
         emit statusChanged();
         emit viewChanged();
+        // Complete the worker-owned one-view lease only after the GUI has
+        // processed this snapshot; a wedged GUI cannot accumulate views.
+        auto *worker = worker_;
+        if (worker) QMetaObject::invokeMethod(worker,
+            [worker] { worker->acknowledgeSnapshot(); }, Qt::QueuedConnection);
     });
+    // Completion is delivered on the UI event loop, never on the FFI worker.
+    // A wedged foreign call cannot free a reservation and flood this queue.
+    connect(worker_, &BackendWorker::commandCompleted, this,
+            [this] { command_queue_.complete(); }, Qt::QueuedConnection);
     connect(worker_, &BackendWorker::rejected, this,
             [this](const QString &message) {
         status_ = message;
@@ -325,10 +340,28 @@ void UiBridge::start() {
 void UiBridge::submit(uint32_t op, const QString &id,
                       const QString &generation, const QString &url) {
     if (!worker_ || !connected_) return;
+    if (!OresBrowserUiQueueV1::captureFits(op,
+            static_cast<std::size_t>(id.size()),
+            static_cast<std::size_t>(generation.size()),
+            static_cast<std::size_t>(url.size()))) {
+        status_ = QStringLiteral("Invalid or oversized UI command arguments");
+        emit statusChanged();
+        return;
+    }
+    if (!command_queue_.tryReserve()) {
+        status_ = QStringLiteral("UI command queue full; retry after backend responds");
+        emit statusChanged();
+        return;
+    }
     auto *worker = worker_;
-    QMetaObject::invokeMethod(worker, [worker, op, id, generation, url] {
-        worker->submit(op, id, generation, url);
-    }, Qt::QueuedConnection);
+    if (!QMetaObject::invokeMethod(worker, [worker, op, id, generation, url] {
+            worker->submit(op, id, generation, url);
+            emit worker->commandCompleted();
+        }, Qt::QueuedConnection)) {
+        command_queue_.complete();
+        status_ = QStringLiteral("Cannot queue Oreslang backend command");
+        emit statusChanged();
+    }
 }
 void UiBridge::newTab() { submit(ORES_BROWSER_CMD_NEW_TAB); }
 void UiBridge::selectTab(const QString &id, const QString &generation) {

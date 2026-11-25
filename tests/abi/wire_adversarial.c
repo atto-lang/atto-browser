@@ -10,6 +10,7 @@
 
 int main(void) {
   OresBrowserConfig config = {0};
+  if (ores_browser_validate_config_v1(&config)) return 10;
   config.struct_size = sizeof(config);
   config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
   /* Check startup admission without allowing a malformed record to
