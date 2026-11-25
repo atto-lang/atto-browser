@@ -39,6 +39,10 @@ fi
 # not Qt event-loop delivery behavior.
 c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue"
+# Revision-fenced snapshot queue contract.
+c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/snapshot_queue_admission.cpp -o "$tmp/snapshot-queue"
+"$tmp/snapshot-queue"
 "$tmp/ui-queue"
 # Runtime FFI address-unique marker admission only. No fake Oreslang actor
 # or backend is linked; actual actor binding/dispatch stays a separate gate.
@@ -52,6 +56,10 @@ if command -v clang++ >/dev/null 2>&1; then
     -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue-sanitize"
   "$tmp/ui-queue-sanitize"
+  clang++ -std=c++17 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I include tests/abi/snapshot_queue_admission.cpp -o "$tmp/snapshot-queue-sanitize"
+  "$tmp/snapshot-queue-sanitize"
 fi
 if command -v clang++ >/dev/null 2>&1; then
   clang++ -std=c++17 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic -pthread \
@@ -63,7 +71,7 @@ fi
 # Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/backend_integration.c -ldl -o "$tmp/backend-ffi"
-echo "ABI_LAYOUT_WIRE_AND_UI_QUEUE_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
+echo "ABI_LAYOUT_WIRE_UI_QUEUE_AND_REVISION_SNAPSHOT_EXECUTED; BACKEND_PROBE_COMPILED_ONLY"
 for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
     desktop/qt/UiBridge.cpp desktop/qt/Main.qml \
     desktop/qt/CMakeLists.txt include/ores_browser_ui_abi_v1.h; do
@@ -71,6 +79,7 @@ for file in desktop/qt/main.cpp desktop/qt/UiBridge.h \
 done
 grep -Fq 'qmlRegisterSingletonInstance(' desktop/qt/main.cpp
 grep -Fq 'qt_add_qml_module(' desktop/qt/CMakeLists.txt
+grep -Fq 'qt_snapshot_ack_event_loop' desktop/qt/CMakeLists.txt
 grep -Fq 'Qt::QueuedConnection' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
@@ -91,10 +100,10 @@ grep -Fq 'BROWSER_HANDLE_TABLE_256_LIFETIME_SLOTS_PASS' tests/abi/session_handle
 test -f include/ores_browser_chrome_text_v1.h
 test -f tests/abi/chrome_control_matrix.c
 grep -Fq 'commandCompleted' desktop/qt/UiBridge.cpp
-grep -Fq 'view_gate_.pending()' desktop/qt/UiBridge.cpp
-grep -Fq 'view_gate_.tryReserve()' desktop/qt/UiBridge.cpp
-grep -Fq 'view_gate_.acknowledge()' desktop/qt/UiBridge.cpp
-grep -Fq 'worker->acknowledgeSnapshot()' desktop/qt/UiBridge.cpp
+grep -Fq 'snapshot_queue_.pending()' desktop/qt/UiBridge.cpp
+grep -Fq 'snapshot_queue_.tryReserve(last_revision_)' desktop/qt/UiBridge.cpp
+grep -Fq 'snapshot_queue_.acknowledge(revision)' desktop/qt/UiBridge.cpp
+grep -Fq 'worker->acknowledgeSnapshot(revision)' desktop/qt/UiBridge.cpp
 grep -Fq 'textFormat: Text.PlainText' desktop/qt/Main.qml
 if grep -Eiq '(WebEngineView|import QtWebEngine|QtWebView|WKWebView|WebView2|Electron)' desktop/qt/Main.qml; then
   echo "FORBIDDEN_EMBEDDED_WEBVIEW" >&2
