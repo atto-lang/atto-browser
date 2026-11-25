@@ -36,6 +36,8 @@ grep -Fq 'Qt::QueuedConnection' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_abi_version' desktop/qt/UiBridge.cpp
 grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
 grep -Fq 'ores_browser_validate_config_v1(&config)' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_NEXT_TAB);' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_PREVIOUS_TAB);' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_snapshot_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_chrome_url_v1' desktop/qt/UiBridge.cpp

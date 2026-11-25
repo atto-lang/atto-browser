@@ -86,6 +86,18 @@ int main(void) {
   command.struct_size = sizeof(command);
   command.operation = ORES_BROWSER_CMD_NEW_TAB;
   EXPECT(ores_browser_validate_command_v1(&command), "new-tab");
+  memcpy(command.url, "https://a.test/", 16u);
+  EXPECT(ores_browser_validate_command_v1(&command), "new-tab-optional-url");
+  command.url[200] = 'X';
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-nonzero-padding");
+  command.url[200] = 0;
+  memset(command.url, 'X', sizeof(command.url));
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-unterminated");
+  memset(command.url, 0, sizeof(command.url));
+  EXPECT(ores_browser_validate_command_v1(&command), "restored-empty-new-tab-url");
+  command.url[0] = (char)0x80;
+  EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-url-invalid-utf8");
+  command.url[0] = 0;
   command.tab_id = 1u;
   EXPECT(!ores_browser_validate_command_v1(&command), "new-tab-smuggle");
   command.tab_id = 0u;
@@ -101,6 +113,19 @@ int main(void) {
   EXPECT(!ores_browser_validate_command_v1(&command), "unexpected-url");
   memset(command.url, 0, sizeof(command.url));
   EXPECT(ores_browser_validate_command_v1(&command), "valid-close");
+  command.operation = ORES_BROWSER_CMD_NEXT_TAB;
+  command.tab_id = 0u; command.tab_generation = 0u;
+  EXPECT(ores_browser_validate_command_v1(&command), "session-scoped-next");
+  command.tab_id = 41u; command.tab_generation = 5u;
+  EXPECT(!ores_browser_validate_command_v1(&command), "next-tab-smuggle");
+  command.operation = ORES_BROWSER_CMD_PREVIOUS_TAB;
+  command.tab_id = 0u; command.tab_generation = 0u;
+  EXPECT(ores_browser_validate_command_v1(&command), "session-scoped-previous");
+  command.tab_generation = 1u;
+  EXPECT(!ores_browser_validate_command_v1(&command), "previous-generation-smuggle");
+  command.tab_generation = 0u;
+  command.operation = ORES_BROWSER_CMD_SELECT_TAB;
+  EXPECT(!ores_browser_validate_command_v1(&command), "missing-tab-capability");
   command.operation = 999u;
   EXPECT(!ores_browser_validate_command_v1(&command), "unknown-op");
 

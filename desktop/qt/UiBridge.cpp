@@ -154,7 +154,9 @@ void BackendWorker::submit(uint32_t op, const QString &id,
     OresBrowserCommand command{};
     command.struct_size = sizeof(command);
     command.operation = op;
-    if (op != ORES_BROWSER_CMD_NEW_TAB) {
+    if (op != ORES_BROWSER_CMD_NEW_TAB &&
+        op != ORES_BROWSER_CMD_NEXT_TAB &&
+        op != ORES_BROWSER_CMD_PREVIOUS_TAB) {
         bool id_ok = false, gen_ok = false;
         command.tab_id = id.toULongLong(&id_ok, 10);
         command.tab_generation = generation.toULongLong(&gen_ok, 10);
@@ -351,9 +353,9 @@ void UiBridge::reload() {
 }
 void UiBridge::nextTab() {
     if (!activeId_.isEmpty())
-        submit(ORES_BROWSER_CMD_NEXT_TAB, activeId_, activeGeneration_);
+        submit(ORES_BROWSER_CMD_NEXT_TAB);
 }
 void UiBridge::previousTab() {
     if (!activeId_.isEmpty())
-        submit(ORES_BROWSER_CMD_PREVIOUS_TAB, activeId_, activeGeneration_);
+        submit(ORES_BROWSER_CMD_PREVIOUS_TAB);
 }

@@ -54,7 +54,10 @@ static inline int ores_browser_validate_command_v1(
       command->operation < ORES_BROWSER_CMD_NEW_TAB ||
       command->operation > ORES_BROWSER_CMD_PREVIOUS_TAB) return 0;
 
-  if (command->operation == ORES_BROWSER_CMD_NEW_TAB) {
+  /* Session-scoped commands do not carry a tab identity. */
+  if (command->operation == ORES_BROWSER_CMD_NEW_TAB ||
+      command->operation == ORES_BROWSER_CMD_NEXT_TAB ||
+      command->operation == ORES_BROWSER_CMD_PREVIOUS_TAB) {
     if (command->tab_id != 0u || command->tab_generation != 0u) return 0;
   } else if (command->tab_id == 0u || command->tab_generation == 0u) {
     return 0;
@@ -65,7 +68,10 @@ static inline int ores_browser_validate_command_v1(
     if (command->url[0] == '\0') return 0;
     return ores_browser_chrome_url_v1(command->url, ORES_BROWSER_URL_BYTES);
   }
-  /* All non-navigation commands must not smuggle URL bytes. */
+  /* Optional initial URL uses the same canonical UTF-8 chrome boundary. */
+  if (command->operation == ORES_BROWSER_CMD_NEW_TAB)
+    return ores_browser_chrome_url_v1(command->url, ORES_BROWSER_URL_BYTES);
+  /* All remaining commands must not smuggle URL bytes. */
   return ores_browser_zero_bytes_v1(command->url, ORES_BROWSER_URL_BYTES);
 }
 
