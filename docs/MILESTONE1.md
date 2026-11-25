@@ -62,6 +62,35 @@ against the **exact targeted compiler head**, including effect declaration,
 loan lifetime, and no suspension inside a write loan. Do not claim semantic
 enforcement based on source spelling.
 
+## Exact-tree private CI handoff (approval not granted)
+
+The source org's GitHub Actions jobs still fail **before recorded steps**
+(`runner_id=0`). A **source-free** runner canary in the private
+`usa-acc/usa-acc-e2e` repository completed successfully with an actual
+runner and three executed steps:
+[run #40935013310](https://github.com/usa-acc/usa-acc-e2e/actions/runs/40935013310).
+
+The source is private, and a successful canary does NOT grant permission
+to transfer it. [Security approval issue #4](https://github.com/ores-truffle-oreslang/oreslang-web-browser.ores/issues/4)
+requires a destination-specific independent reviewer, immutable source
+tree pin, approved retention/access controls and protected review gates.
+**No browser source was transferred to the candidate organization.**
+
+A new `ci/verify-mirror-identity.sh` checks the carrier checkout SHA,
+the independently supplied source Git tree SHA, all tracked path/mode/blob
+identities implied by that tree, and an entirely clean working tree.
+It deliberately reports identity only—not transfer authorization, budget,
+compiler execution, or code correctness. The hermetic
+`tests/ci/test-mirror-identity.sh` creates **synthetic test repositories**
+and rejects wrong commits, wrong trees, invalid pins, dirty files and a
+file-mode-only change. It also accepts a mirror commit whose hash differs
+from the source commit while retaining the exact source tree.
+
+These scripts were checked as POSIX shell and executed locally
+with positive and negative test paths; their Git blob hashes were read
+back from the committed branch and compared. This is independent of
+native Oreslang compiler/Qt execution.
+
 ## Remaining hard dependencies
 
 - Upstream LLVM compiler contract: [oreslang-source.llvm issue #1163](https://github.com/ores-truffle-oreslang/oreslang-source.llvm/issues/1163).

@@ -108,6 +108,17 @@ int main(int argc, char **argv) {
   }
   if (open_session(&config, &browser) != ORES_BROWSER_OK || !browser)
     die("backend open (requires trusted fresh test session)");
+  /* Failed OPEN must clear a valid, previously populated output slot. */
+  for (unsigned invalid = 0u; invalid < 4u; ++invalid) {
+    OresBrowserConfig bad = config;
+    OresBrowserHandle *rejected = browser;
+    if (invalid == 0u) bad.reserved = 1u;
+    else if (invalid == 1u) bad.struct_size = 0u;
+    else if (invalid == 2u) bad.abi_version++;
+    else bad.private_session = 2u;
+    if (open_session(&bad, &rejected) != ORES_BROWSER_INVALID || rejected != NULL)
+      die("invalid OPEN did not reject and clear output slot");
+  }
   if (open_session(&config, &other_browser) != ORES_BROWSER_OK ||
       !other_browser || other_browser == browser)
     die("backend failed to create an independent session handle");
@@ -233,12 +244,21 @@ int main(int argc, char **argv) {
   if (other_view->revision != other_revision || other_view->tab_count != 1u)
     die("stale generation mutated other session");
   close_session(other_browser);
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  if (dispatch(other_browser, &cmd) == ORES_BROWSER_OK || read(other_browser, other_view) == ORES_BROWSER_OK)
+    die("retired session capability admitted");
   // Closing the other browser must not retire the surviving session.
   snapshot(read, browser, view, revision);
   if (view->revision != revision || view->tab_count != 1u ||
       !find_tab(view, second_id))
     die("closing other session mutated surviving session");
+  command(&cmd, ORES_BROWSER_CMD_NEW_TAB, 0u, 0u);
+  if (dispatch(browser, &cmd) != ORES_BROWSER_OK) die("surviving session unusable after retirement");
+  snapshot(read, browser, view, revision);
+  if (view->tab_count != 2u || view->revision <= revision) die("surviving session lost new tab");
   close_session(browser);
+  if (dispatch(browser, &cmd) == ORES_BROWSER_OK || read(browser, view) == ORES_BROWSER_OK)
+    die("retired surviving session admitted");
   free(other_view);
   free(view);
   if (dlclose(library) != 0) die("backend dynamic library unload");

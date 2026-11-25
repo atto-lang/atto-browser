@@ -19,7 +19,7 @@ tree=$(git rev-parse --verify 'HEAD^{tree}') || fail "source tree unavailable"
 # GitHub Actions repository identity is a second independent admission gate.
 # A local exact-head run may leave GITHUB_ACTIONS unset.
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-  [ "${GITHUB_REPOSITORY:-}" = "ores-truffle-oreslang/oreslang-web-browser.ores" ] ||
+  [ "${GITHUB_REPOSITORY:-}" = "atto-lang/atto-browser" ] ||
     fail "unapproved GitHub Actions repository origin (issue #4)"
 fi
 [ -z "$(git status --porcelain --untracked-files=all)" ] ||

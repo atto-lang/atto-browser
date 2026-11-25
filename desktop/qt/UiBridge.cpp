@@ -40,7 +40,9 @@ bool safeChromeUrl(const QString &value) {
         const ushort u = c.unicode();
         if (ores_browser_chrome_disallowed_v1(u)) return false;
     }
-    return true;
+    const QByteArray bytes = value.toUtf8();
+    return bytes.size() < ORES_BROWSER_URL_BYTES &&
+           ores_browser_chrome_url_v1(bytes.constData(), static_cast<size_t>(bytes.size() + 1));
 }
 // Webpage titles are never authority. Replace dangerous controls for
 // display rather than allowing untrusted page content to kill the browser.
@@ -99,8 +101,6 @@ void BackendWorker::start() {
     config.abi_version = ORES_BROWSER_UI_ABI_VERSION;
     // Privileged Oreslang supervisor chooses tenant and profile.
     config.private_session = 0;
-    // Canonical v1 wire preflight. The trusted actor backend MUST repeat
-    // validation and separately authorize the profile/tenant choice.
     if (!ores_browser_validate_config_v1(&config)) {
         failClosed(QStringLiteral("Invalid Oreslang startup configuration"));
         return;
@@ -161,9 +161,7 @@ void BackendWorker::submit(uint32_t op, const QString &id,
             return;
         }
     }
-    // NEW_TAB admits a bounded optional initial URL, while NAVIGATE must
-    // supply one. A trusted Oreslang supervisor, not Qt, authorizes origins.
-    // Do not silently discard a NEW_TAB URL after queue admission.
+    // NEW_TAB accepts an optional bounded URL, NAVIGATE requires one.
     if (op == ORES_BROWSER_CMD_NAVIGATE ||
         op == ORES_BROWSER_CMD_NEW_TAB) {
         const QByteArray value = url.toUtf8();
@@ -318,7 +316,7 @@ void UiBridge::start() {
         // ACK only after the UI has consumed the snapshot, and only on the
         // worker thread. A frozen UI retains one credit indefinitely.
         auto *worker = worker_;
-        if (!QMetaObject::invokeMethod(worker, [worker, revision] {
+        if (!worker || !QMetaObject::invokeMethod(worker, [worker, revision] {
                 worker->acknowledgeSnapshot(revision);
             }, Qt::QueuedConnection)) {
             connected_ = false;

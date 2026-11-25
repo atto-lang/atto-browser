@@ -36,6 +36,8 @@ jobs:
           echo "Source-only checks (NOT compiler/Qt/guest evidence): \`$actual\` / \`$tree\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Source structure only (not native execution)
         run: sh ci/check-source.sh
+      - name: Synthetic exact-tree mirror identity positive and negative cases
+        run: sh tests/ci/test-mirror-identity.sh
       - name: Native harness shell syntax
         run: sh -n ci/verify-native.sh
       - name: Real backend FFI harness shell syntax only

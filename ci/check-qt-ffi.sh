@@ -14,6 +14,9 @@ c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
 "$tmp/abi-cpp"
 cc -std=c11 -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/wire_adversarial.c -o "$tmp/abi-wire"
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  -I include tests/abi/chrome_url_adversarial.c -o "$tmp/abi-chrome-url"
+"$tmp/abi-chrome-url"
 "$tmp/abi-wire"
 # Always-on Release-mode anti-spoofing gate: all 65536 UTF-16 code units.
 # This is a portable host contract test, not a compiled Qt event loop.
@@ -36,11 +39,16 @@ fi
 # not Qt event-loop delivery behavior.
 c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/ui_queue_admission.cpp -o "$tmp/ui-queue"
-"$tmp/ui-queue"
-# Revision-fenced worker-to-UI snapshot credit / replay refusal (host-only).
+# Revision-fenced snapshot queue contract.
 c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic \
   -I include tests/abi/snapshot_queue_admission.cpp -o "$tmp/snapshot-queue"
 "$tmp/snapshot-queue"
+"$tmp/ui-queue"
+# Runtime FFI address-unique marker admission only. No fake Oreslang actor
+# or backend is linked; actual actor binding/dispatch stays a separate gate.
+c++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -pedantic -pthread \
+  -I include tests/abi/session_handle_table.cpp -o "$tmp/session-handles"
+"$tmp/session-handles"
 # If Clang is present, also execute the identical byte-boundary matrix under
 # memory and undefined-behavior sanitizers; a sanitizer failure is fatal.
 if command -v clang++ >/dev/null 2>&1; then
@@ -52,6 +60,12 @@ if command -v clang++ >/dev/null 2>&1; then
     -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I include tests/abi/snapshot_queue_admission.cpp -o "$tmp/snapshot-queue-sanitize"
   "$tmp/snapshot-queue-sanitize"
+fi
+if command -v clang++ >/dev/null 2>&1; then
+  clang++ -std=c++17 -O1 -g -DNDEBUG -Wall -Wextra -Werror -pedantic -pthread \
+    -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I include tests/abi/session_handle_table.cpp -o "$tmp/session-handles-sanitize"
+  "$tmp/session-handles-sanitize"
 fi
 # Compile/link integration acceptance, but NEVER run without pinned real
 # Oreslang backend and the separate ci/verify-backend-ffi.sh gate.
@@ -72,19 +86,20 @@ grep -Fq 'No WebEngine/QtWebView' desktop/qt/CMakeLists.txt
 grep -Fq 'ores_browser_validate_snapshot_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_command_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_validate_config_v1(&config)' desktop/qt/UiBridge.cpp
-grep -Fq 'submit(ORES_BROWSER_CMD_NEXT_TAB);' desktop/qt/UiBridge.cpp
-grep -Fq 'submit(ORES_BROWSER_CMD_PREVIOUS_TAB);' desktop/qt/UiBridge.cpp
-# Contract: the optional NEW_TAB URL must be accepted by the queue and
-# encoded into the worker wire record, not silently dropped.
 grep -Fq 'op == ORES_BROWSER_CMD_NEW_TAB) {' include/ores_browser_ui_queue_v1.h
 grep -Fq 'if (op == ORES_BROWSER_CMD_NAVIGATE ||' desktop/qt/UiBridge.cpp
 grep -Fq 'if (!value.isEmpty())' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_NEXT_TAB);' desktop/qt/UiBridge.cpp
+grep -Fq 'submit(ORES_BROWSER_CMD_PREVIOUS_TAB);' desktop/qt/UiBridge.cpp
+grep -Fq 'ores_browser_chrome_url_v1' desktop/qt/UiBridge.cpp
 grep -Fq 'Snapshot changed without revision increment' desktop/qt/UiBridge.cpp
 grep -Fq 'libraryFile.isSymLink()' desktop/qt/UiBridge.cpp
 grep -Fq 'std::_Exit(70)' desktop/qt/UiBridge.cpp
 grep -Fq 'command_queue_.tryReserve()' desktop/qt/UiBridge.cpp
 grep -Fq 'OresBrowserUiQueueV1::captureFits' desktop/qt/UiBridge.cpp
 grep -Fq 'ores_browser_chrome_disallowed_v1(u)' desktop/qt/UiBridge.cpp
+grep -Fq 'kLifetimeSlots = 256' include/ores_browser_session_handle_table_v1.h
+grep -Fq 'BROWSER_HANDLE_TABLE_256_LIFETIME_SLOTS_PASS' tests/abi/session_handle_table.cpp
 test -f include/ores_browser_chrome_text_v1.h
 test -f tests/abi/chrome_control_matrix.c
 grep -Fq 'commandCompleted' desktop/qt/UiBridge.cpp
