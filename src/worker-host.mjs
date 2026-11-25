@@ -47,8 +47,10 @@ function validInt(x,min,max,name){
 }
 export function runVerifiedCoreGuestInWorker({
  wasmBytes,manifest,workerFactory,signal,
- timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32
+ timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32,
+ sealedExports=false
 }={}){
+ if(typeof sealedExports!=="boolean")fail("sealedExports must be a boolean");
  validInt(timeoutMs,1,30000,"timeoutMs");
  validInt(maxModuleBytes,8,1048576,"maxModuleBytes");
  validInt(maxMemoryPages,1,256,"maxMemoryPages");
@@ -92,10 +94,22 @@ export function runVerifiedCoreGuestInWorker({
   const onMessage=event=>{
    try {
    const data=event?.data;
-   if(!data||data.kind!=="oreslang-core-result-v1"||typeof data.ok!=="boolean")
+   // Trust only own data properties from the cloned Worker reply. Reading
+   // inherited fields can turn a prototype-polluted empty object into a
+   // forged success; reading accessors executes caller-controlled code.
+   if(!data||typeof data!=="object"||Array.isArray(data))
     return settle(new Error("invalid isolated Wasm worker response"));
-   if(!data.ok)return settle(new Error("verified Wasm guest execution rejected"));
-   const str=data.value;
+   const kind=Object.getOwnPropertyDescriptor(data,"kind");
+   const ok=Object.getOwnPropertyDescriptor(data,"ok");
+   if(!kind||!Object.hasOwn(kind,"value")||
+      kind.value!=="oreslang-core-result-v1"||
+      !ok||!Object.hasOwn(ok,"value")||typeof ok.value!=="boolean")
+    return settle(new Error("invalid isolated Wasm worker response"));
+   if(!ok.value)return settle(new Error("verified Wasm guest execution rejected"));
+   const ownedValue=Object.getOwnPropertyDescriptor(data,"value");
+   if(!ownedValue||!Object.hasOwn(ownedValue,"value"))
+    return settle(new Error("invalid isolated Wasm worker response"));
+   const str=ownedValue.value;
    if(typeof str!=="string"||str.length>20||!signedI64.test(str))
     return settle(new Error("invalid signed i64 Worker result"));
    const value=BigInt(str);
@@ -130,7 +144,7 @@ export function runVerifiedCoreGuestInWorker({
    // Deliberately omit transfer list: guest module bytes have copy semantics.
    if(done)return;
    worker.postMessage({kind:"oreslang-core-run-v1",wasmBytes:bytes,
-    manifest:admittedManifest,maxModuleBytes,maxMemoryPages});
+    manifest:admittedManifest,maxModuleBytes,maxMemoryPages,sealedExports});
   }catch(error){settle(error)}
  });
 }

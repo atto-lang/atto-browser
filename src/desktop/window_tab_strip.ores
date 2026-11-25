@@ -1,0 +1,111 @@
+// Window tab-strip prototype with one actor-owned state schema.
+// These ordered presentation indices are NOT stable tab IDs and must not
+// be used across the FFI. All mutations use handle_state critical callbacks.
+define actor WindowTabStripActor as
+  state {
+    tab_count: int = 0;
+    selected_index: int = 0;
+  }
+
+  handle_operation(operation: String): int using state.read, state.write {
+    return self.handle_state(critical |s| -> {
+      if operation == "new"; do
+        if s.tab_count >= 64; do return -1; fi
+        s.tab_count = s.tab_count + 1;
+        s.selected_index = s.tab_count;
+        return s.selected_index;
+      fi
+      if operation == "next"; do
+        if s.tab_count <= 0; do return -1; fi
+        if s.selected_index == s.tab_count; do
+          s.selected_index = 1;
+        else
+          s.selected_index = s.selected_index + 1;
+        fi
+        return s.selected_index;
+      fi
+      if operation == "previous"; do
+        if s.tab_count <= 0; do return -1; fi
+        if s.selected_index <= 1; do
+          s.selected_index = s.tab_count;
+        else
+          s.selected_index = s.selected_index - 1;
+        fi
+        return s.selected_index;
+      fi
+      if operation == "close-tab"; do
+        if s.tab_count <= 0; do return -1; fi
+        s.tab_count = s.tab_count - 1;
+        if s.selected_index > s.tab_count; do
+          s.selected_index = s.tab_count;
+        fi
+        return s.selected_index;
+      fi
+      return -1;
+    });
+  }
+
+  receive(ActorMail<String> mail): void {
+    if mail.value == "quit"; do
+      self.send(0);
+      self.end();
+      return;
+    fi
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
+    self.send(reply);
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val win = await spawn WindowTabStripActor();
+  win.send("next");
+  val empty = (await win.outputs.next()).value.unwrap();
+  if empty.value != -1; do
+    stdio.stdout.write("FAIL:empty-strip"); return;
+  fi
+  win.send("new");
+  val first = (await win.outputs.next()).value.unwrap();
+  if first.value != 1; do
+    stdio.stdout.write("FAIL:new-first"); return;
+  fi
+  win.send("new");
+  val second = (await win.outputs.next()).value.unwrap();
+  if second.value != 2; do
+    stdio.stdout.write("FAIL:new-second"); return;
+  fi
+  win.send("previous");
+  val previous = (await win.outputs.next()).value.unwrap();
+  if previous.value != 1; do
+    stdio.stdout.write("FAIL:previous"); return;
+  fi
+  win.send("next");
+  val next = (await win.outputs.next()).value.unwrap();
+  if next.value != 2; do
+    stdio.stdout.write("FAIL:next"); return;
+  fi
+  win.send("close-tab");
+  val remaining = (await win.outputs.next()).value.unwrap();
+  if remaining.value != 1; do
+    stdio.stdout.write("FAIL:close-selected"); return;
+  fi
+  win.send("next");
+  val wrap = (await win.outputs.next()).value.unwrap();
+  if wrap.value != 1; do
+    stdio.stdout.write("FAIL:wrap"); return;
+  fi
+  win.send("close-tab");
+  val none = (await win.outputs.next()).value.unwrap();
+  if none.value != 0; do
+    stdio.stdout.write("FAIL:close-last"); return;
+  fi
+  win.send("quit");
+  val stopped = (await win.outputs.next()).value.unwrap();
+  await win.get_done();
+  if stopped.value != 0; do
+    stdio.stdout.write("FAIL:quit"); return;
+  fi
+  stdio.stdout.write("browser:tab-strip-ok");
+  return;
+}

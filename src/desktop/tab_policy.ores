@@ -1,0 +1,57 @@
+// Native desktop shell policy (trusted browser-issued identities only).
+// Tab content runs in sandboxed renderers; chrome UI is privileged.
+pub fnc may_open_tab(int window_tenant, int request_tenant,
+    int window_profile, int request_profile,
+    int tab_count, int max_tabs, bool window_live,
+    bool window_private, bool tab_private): bool {
+  if window_tenant <= 0 || request_tenant <= 0; do return false; fi
+  if window_profile <= 0 || request_profile <= 0; do return false; fi
+  if tab_count < 0 || max_tabs <= 0 || tab_count >= max_tabs; do
+    return false;
+  fi
+  if !window_live || window_private != tab_private; do return false; fi
+  return window_tenant == request_tenant &&
+         window_profile == request_profile;
+}
+
+// Focus is delegated from the trusted tab strip, never from renderer IPC.
+pub fnc may_focus_tab(int window_tenant, int tab_tenant,
+    int window_profile, int tab_profile, int window_generation,
+    int presented_generation, bool window_live, bool tab_live,
+    bool trusted_chrome_gesture): bool {
+  if window_tenant <= 0 || tab_tenant <= 0; do return false; fi
+  if window_profile <= 0 || tab_profile <= 0; do return false; fi
+  if window_generation <= 0 || presented_generation <= 0; do
+    return false;
+  fi
+  if !window_live || !tab_live || !trusted_chrome_gesture; do
+    return false;
+  fi
+  return window_tenant == tab_tenant &&
+         window_profile == tab_profile &&
+         window_generation == presented_generation;
+}
+
+// Private tabs must not produce persistent session restore records.
+pub fnc may_persist_tab_session(int window_tenant, int tab_tenant,
+    int window_profile, int tab_profile, bool window_private,
+    bool tab_private, bool explicitly_enabled, bool storage_unlocked): bool {
+  if window_tenant <= 0 || tab_tenant <= 0; do return false; fi
+  if window_profile <= 0 || tab_profile <= 0; do return false; fi
+  if window_private || tab_private; do return false; fi
+  if !explicitly_enabled || !storage_unlocked; do return false; fi
+  return window_tenant == tab_tenant &&
+         window_profile == tab_profile;
+}
+
+// A tab cannot be dragged across tenant, profile or private-mode boundaries.
+pub fnc may_move_tab(int source_tenant, int target_tenant,
+    int source_profile, int target_profile, bool source_private,
+    bool target_private, bool tab_live, bool trusted_chrome_gesture): bool {
+  if source_tenant <= 0 || target_tenant <= 0; do return false; fi
+  if source_profile <= 0 || target_profile <= 0; do return false; fi
+  if !tab_live || !trusted_chrome_gesture; do return false; fi
+  return source_tenant == target_tenant &&
+         source_profile == target_profile &&
+         source_private == target_private;
+}
