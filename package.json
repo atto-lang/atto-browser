@@ -12,6 +12,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "test:browser": "node tests/real-browser-e2e.mjs"
+    "test:browser": "node tests/real-browser-e2e.mjs",
+    "test:browser-tenants": "node tests/browser-tenants-e2e.mjs",
+    "test:browser-js": "node tests/browser-js-worker-e2e.mjs"
   }
 }
