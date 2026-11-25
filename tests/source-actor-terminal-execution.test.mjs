@@ -47,13 +47,12 @@ test("terminal replay during digest prevents ALL subsequent compiled actor execu
    const instance=await realWasm.instantiate(...args);
    const init=instance.exports[manifest.actor.init];
    const handle=instance.exports[manifest.actor.onMessage];
-   const teardown=instance.exports[manifest.actor.teardown];
    // Keep original compiled Wasm functions, just instrument their entry.
    // An ordinary object avoids Proxy invariants on Wasm export objects.
    return {exports:{
     [manifest.actor.init]:()=>init(),
     [manifest.actor.onMessage]:(value)=>{turns++;return handle(value)},
-    [manifest.actor.teardown]:()=>teardown()
+    ...(manifest.actor.teardown?{[manifest.actor.teardown]:()=>instance.exports[manifest.actor.teardown]()}:{})
    }};
   };
   Object.defineProperty(globalThis,"WebAssembly",{configurable:true,value:wasm});

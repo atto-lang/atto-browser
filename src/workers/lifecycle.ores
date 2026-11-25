@@ -1,0 +1,127 @@
+// Actor-owned service-worker lifecycle demonstration. All mutable instance
+// data is in the sole state field and guarded by handle_state(critical ...).
+// No JS worker, persistence, network or privileged broker exists yet.
+define actor WorkerRegistrationActor as
+  state {
+    registered: bool = false;
+    active: bool = false;
+    running: bool = false;
+    waiting: bool = false;
+    generation: int = 0;
+  }
+
+  handle_operation(operation: String): String using state.read, state.write {
+    return self.handle_state(critical |s| -> {
+      if operation == "register"; do
+        if s.registered; do return "duplicate"; fi
+        s.registered = true;
+        s.waiting = true;
+        return "installed-waiting";
+      fi
+      if operation == "activate"; do
+        if !s.registered || !s.waiting || s.active; do
+          return "rejected";
+        fi
+        s.generation = 1;
+        s.waiting = false;
+        s.active = true;
+        s.running = true;
+        return "active";
+      fi
+      if operation == "stage-update"; do
+        if !s.active || s.waiting; do return "rejected"; fi
+        s.waiting = true;
+        return "update-waiting";
+      fi
+      if operation == "activate-update"; do
+        if !s.registered || !s.active || !s.waiting; do
+          return "rejected";
+        fi
+        s.generation = s.generation + 1;
+        s.waiting = false;
+        s.running = true;
+        return "update-active";
+      fi
+      if operation == "sleep"; do
+        if !s.active || !s.running; do return "rejected"; fi
+        s.running = false;
+        return "dormant";
+      fi
+      if operation == "wake"; do
+        if !s.active || s.running; do return "rejected"; fi
+        s.running = true;
+        return "awakened";
+      fi
+      if operation == "unregister"; do
+        s.registered = false;
+        s.waiting = false;
+        s.active = false;
+        s.running = false;
+        return "unregistered";
+      fi
+      return "rejected";
+    });
+  }
+
+  receive(ActorMail<String> mail): void {
+    val operation = mail.value;
+    val reply = self.handle_operation(operation);
+    self.send(reply);
+    if operation == "unregister" && reply == "unregistered"; do
+      self.end();
+    fi
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val registration = await spawn WorkerRegistrationActor();
+  registration.send("activate");
+  val premature = (await registration.outputs.next()).value.unwrap();
+  if premature.value != "rejected"; do
+    stdio.stdout.write("FAIL:premature-activate"); return;
+  fi
+  registration.send("register");
+  val registered = (await registration.outputs.next()).value.unwrap();
+  if registered.value != "installed-waiting"; do
+    stdio.stdout.write("FAIL:register"); return;
+  fi
+  registration.send("activate");
+  val active = (await registration.outputs.next()).value.unwrap();
+  if active.value != "active"; do
+    stdio.stdout.write("FAIL:activate"); return;
+  fi
+  registration.send("stage-update");
+  val update = (await registration.outputs.next()).value.unwrap();
+  if update.value != "update-waiting"; do
+    stdio.stdout.write("FAIL:stage"); return;
+  fi
+  registration.send("stage-update");
+  val duplicate = (await registration.outputs.next()).value.unwrap();
+  if duplicate.value != "rejected"; do
+    stdio.stdout.write("FAIL:duplicate-update"); return;
+  fi
+  registration.send("sleep");
+  val dormant = (await registration.outputs.next()).value.unwrap();
+  if dormant.value != "dormant"; do
+    stdio.stdout.write("FAIL:sleep"); return;
+  fi
+  registration.send("wake");
+  val awakened = (await registration.outputs.next()).value.unwrap();
+  if awakened.value != "awakened"; do
+    stdio.stdout.write("FAIL:wake"); return;
+  fi
+  registration.send("activate-update");
+  val promoted = (await registration.outputs.next()).value.unwrap();
+  if promoted.value != "update-active"; do
+    stdio.stdout.write("FAIL:promote"); return;
+  fi
+  registration.send("unregister");
+  val stopped = (await registration.outputs.next()).value.unwrap();
+  await registration.get_done();
+  if stopped.value != "unregistered"; do
+    stdio.stdout.write("FAIL:unregister"); return;
+  fi
+  stdio.stdout.write("browser:worker-lifecycle-ok");
+  return;
+}

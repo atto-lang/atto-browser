@@ -157,14 +157,14 @@ test("stale DATA and CONTROL incarnations never execute the compiled guest",{
  }
 });
 
-test("legacy actor-i64-v1 artifact must be rejected, never reinterpreted as v2",{
+// Both manifest ABIs are explicitly admitted, never reinterpreted.
+test("compiled actor ABI label and exports must agree",{
  skip:!wasmPath||!manifestPath
 },async()=>{
  const g=await guest();
- g.manifest.artifactType="oreslang.core-wasm.actor-i64-v1";
+ g.manifest.artifactType=g.manifest.artifactType==="oreslang.core-wasm.actor-i64-v1"?"oreslang.core-wasm.actor-i64-v2":"oreslang.core-wasm.actor-i64-v1";
  const w=new Worker(workerUrl,{type:"module"});
  try{
-  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g,incarnation}),
-   tag({kind:"oreslang-v2-panic"}));
+  assert.deepEqual(await exchange(w,{kind:"oreslang-v2-init",...spec,guest:g,incarnation}),tag({kind:"oreslang-v2-panic"}));
  }finally{await w.terminate()}
 });

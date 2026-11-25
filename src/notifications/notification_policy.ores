@@ -1,0 +1,75 @@
+// Web notifications are brokered by the trusted browser + OS. No site may
+// assert permission, synthetic activation or OS-level delivery directly.
+// v0 defaults to denying permission prompts in private profiles.
+pub fnc may_prompt_notifications(int tenant, int top_tenant,
+    int requesting_origin, int top_origin, bool secure_context,
+    bool top_level_document, bool user_activation, bool foreground,
+    bool abusive_origin, bool private_profile): bool {
+  if tenant <= 0 || top_tenant <= 0; do return false; fi
+  if requesting_origin <= 0 || top_origin <= 0; do return false; fi
+  if !secure_context || !top_level_document || !user_activation; do
+    return false;
+  fi
+  if !foreground || abusive_origin || private_profile; do return false; fi
+  return tenant == top_tenant && requesting_origin == top_origin;
+}
+
+// Delivery is separate from permission; OS DND, browser quiet mode, muted
+// site and per-origin rate limit are all mandatory. Counters are supplied by
+// a trusted rate limiter with atomic admission, NOT a renderer.
+pub fnc may_display_notification(int request_tenant, int grant_tenant,
+    int request_origin, int grant_origin, bool secure_context,
+    bool site_granted, bool os_allowed, bool do_not_disturb,
+    bool site_muted, bool private_profile, int sent_in_window,
+    int max_per_window, bool page_or_active_worker_live): bool {
+  if request_tenant <= 0 || grant_tenant <= 0; do return false; fi
+  if request_origin <= 0 || grant_origin <= 0; do return false; fi
+  if sent_in_window < 0 || max_per_window <= 0 ||
+     sent_in_window >= max_per_window; do return false; fi
+  if !secure_context || !site_granted || !os_allowed; do return false; fi
+  if do_not_disturb || site_muted || private_profile; do return false; fi
+  if !page_or_active_worker_live; do return false; fi
+  return request_tenant == grant_tenant &&
+         request_origin == grant_origin;
+}
+
+// A persistent notification must originate from the authorized registration,
+// with an exact partition and live worker generation.
+pub fnc may_show_worker_notification(int request_tenant, int worker_tenant,
+    int request_origin, int worker_origin, int request_storage_key,
+    int worker_storage_key, int presented_worker_generation,
+    int live_worker_generation, bool worker_active,
+    bool permission_granted): bool {
+  if request_tenant <= 0 || worker_tenant <= 0; do return false; fi
+  if request_origin <= 0 || worker_origin <= 0; do return false; fi
+  if request_storage_key <= 0 || worker_storage_key <= 0; do
+    return false;
+  fi
+  if presented_worker_generation <= 0 || live_worker_generation <= 0; do
+    return false;
+  fi
+  if !worker_active || !permission_granted; do return false; fi
+  return request_tenant == worker_tenant &&
+         request_origin == worker_origin &&
+         request_storage_key == worker_storage_key &&
+         presented_worker_generation == live_worker_generation;
+}
+
+// OS notification clicks are dispatched only with host-issued, one-use
+// tickets. Consuming tickets atomically is the future privileged broker's job.
+pub fnc may_route_notification_click(int ticket_tenant, int current_tenant,
+    int ticket_origin, int current_origin, int ticket_generation,
+    int current_generation, bool verified_os_click,
+    bool ticket_unspent, bool profile_live): bool {
+  if ticket_tenant <= 0 || current_tenant <= 0; do return false; fi
+  if ticket_origin <= 0 || current_origin <= 0; do return false; fi
+  if ticket_generation <= 0 || current_generation <= 0; do
+    return false;
+  fi
+  if !verified_os_click || !ticket_unspent || !profile_live; do
+    return false;
+  fi
+  return ticket_tenant == current_tenant &&
+         ticket_origin == current_origin &&
+         ticket_generation == current_generation;
+}

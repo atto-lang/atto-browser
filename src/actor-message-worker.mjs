@@ -67,7 +67,9 @@ async function loadActorGuest({wasmBytes,manifest}={}){
  const bytes=Uint8Array.from(view);
  try{
   const actor=manifest.actor;
-  if(manifest.schemaVersion!==1||manifest.artifactType!=="oreslang.core-wasm.actor-i64-v2"||
+  const v1=manifest.artifactType==="oreslang.core-wasm.actor-i64-v1";
+  const v2=manifest.artifactType==="oreslang.core-wasm.actor-i64-v2";
+  if(manifest.schemaVersion!==1||(!v1&&!v2)||
     manifest.target!=="wasm32"||manifest.environment!=="browser"||
     !Array.isArray(manifest.imports)||manifest.imports.length!==0||
     !Array.isArray(manifest.requiredCapabilities)||manifest.requiredCapabilities.length!==0||
@@ -75,10 +77,13 @@ async function loadActorGuest({wasmBytes,manifest}={}){
     !/^[0-9a-f]{64}$/.test(manifest.wasmSha256||"")||
     !actor||typeof actor.name!=="string"||
     !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(actor.name)||
-    actor.init!=="oreslang_wasm_actor_init"||
-    actor.onMessage!=="oreslang_wasm_actor_on_message"||
-    actor.teardown!=="oreslang_wasm_actor_teardown"||
-    actor.lifecycle!=="NEW-ACTIVE-STOPPED"||
+    (v1&&(actor.init!=="oreslang_actor_"+actor.name+"_init"||
+          actor.onMessage!=="oreslang_actor_"+actor.name+"_on_message"||
+          actor.teardown!==undefined||actor.lifecycle!==undefined))||
+    (v2&&(actor.init!=="oreslang_wasm_actor_init"||
+          actor.onMessage!=="oreslang_wasm_actor_on_message"||
+          actor.teardown!=="oreslang_wasm_actor_teardown"||
+          actor.lifecycle!=="NEW-ACTIVE-STOPPED"))||
     actor.messageShape!=="I"||actor.instancesPerActor!==1||
     manifest.entry!==actor.onMessage)throw Error("invalid actor Wasm manifest");
   const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",bytes));
@@ -92,19 +97,23 @@ async function loadActorGuest({wasmBytes,manifest}={}){
   if(WebAssembly.Module.imports(module).length)
    throw Error("actor Wasm host imports forbidden");
   const exports=WebAssembly.Module.exports(module);
-  if(![actor.init,actor.onMessage,actor.teardown].every(name=>
+  const required=v2?[actor.init,actor.onMessage,actor.teardown]:[actor.init,actor.onMessage];
+  if(!required.every(name=>
       exports.some(x=>x.name===name&&x.kind==="function")))
    throw Error("missing actor Wasm exports");
   const instance=await WebAssembly.instantiate(module);
-  const init=instance.exports[actor.init],handle=instance.exports[actor.onMessage],
-   teardown=instance.exports[actor.teardown];
+  const init=instance.exports[actor.init],handle=instance.exports[actor.onMessage];
+  const teardown=v2?instance.exports[actor.teardown]:null;
   if(typeof init!=="function"||init.length!==0||
      typeof handle!=="function"||handle.length!==1||
-     typeof teardown!=="function"||teardown.length!==0)
+     (v2&&(typeof teardown!=="function"||teardown.length!==0)))
    throw Error("wrong actor Wasm function arity");
   if(closed)throw Error("actor terminated during Wasm initialization");
+  // Take cleanup ownership before init; a partially initialized v2 instance
+  // must not leave a second cleanup path or an executable handler.
+  guestTeardown=teardown;
   init();
-  return {handle,teardown};
+  return handle;
  }finally{bytes.fill(0);scrubOwnedFrame(wasmBytes)}
 }
 // Worker postMessage() snapshots into private destination memory. Never
@@ -121,21 +130,21 @@ function scrubOwnedFrame(frame){
 }
 self.addEventListener("message",async event=>{
  const data=event?.data;
+ // Panic, final drain, and failed INIT are absorbing. A late INIT may still
+ // carry Worker-owned compiled guest bytes that must be erased.
+ if(closed){
+  scrubOwnedFrame(data?.frame);
+  scrubOwnedFrame(data?.guest?.wasmBytes);
+  return;
+ }
  if(!data||typeof data!=="object")return panic();
  if(!ready){
-  if(initializing||data.kind!=="oreslang-v2-init"||typeof data.schemaId!=="string"||
-    typeof data.descriptor!=="string"||
-    data.schemaId.length<1||data.schemaId.length>256||
-    data.descriptor.length<1||data.descriptor.length>4096||
-    !/^[\x21-\x7e]+$/.test(data.schemaId)||
-    !/^[\x21-\x7e]+$/.test(data.descriptor)){
-   // Invalid INIT never transfers guest ownership to the Wasm loader.
-   // Scrub the received structured-clone bytes before terminal failure.
+  if(initializing||data.kind!=="oreslang-v2-init"){
    scrubOwnedFrame(data.frame);
    scrubOwnedFrame(data.guest?.wasmBytes);
-   return panic()
+   return panic();
   }
-  // A descriptor must pass the complete bounded schema grammar before READY.
+  // One bounded grammar shared by host, Worker and typed DATA frames.
   try{validateActorMessageV2Contract(data)}catch{
    scrubOwnedFrame(data.frame);
    scrubOwnedFrame(data.guest?.wasmBytes);
@@ -152,21 +161,16 @@ self.addEventListener("message",async event=>{
    actorIncarnation=data.incarnation;
    if(data.descriptor!=="I"){scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
    try{
-    const guest=await loadActorGuest(data.guest);
-    if(closed){guest.teardown();return}
-    guestHandler=guest.handle;
-    guestTeardown=guest.teardown;
-   }catch{scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
+    const handler=await loadActorGuest(data.guest);
+    if(closed)return;
+    guestHandler=handler;
+   }
+   catch{scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
   }
   if(closed)return;
   ready=true;
   self.postMessage(tagged({kind:"oreslang-v2-ready"}));
   return;
- }
- if(closed){
-  scrubOwnedFrame(data.frame);
-  scrubOwnedFrame(data.guest?.wasmBytes);
-  return
  }
  // The incarnation is an exact capability for this Worker lifetime.
  // A stale queued DATA/CONTROL message from a previous actor incarnation

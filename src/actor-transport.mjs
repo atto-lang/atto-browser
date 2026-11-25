@@ -5,16 +5,46 @@
  */
 import {encodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 const fail=s=>{throw new Error("Oreslang actor transport: "+s)};
+// Captured intrinsic accessors cannot be shadowed by an untrusted typed-array
+// instance's own .buffer, .byteOffset or .byteLength properties.
+// View metadata is validated through native slots. Snapshot via a captured
+// intrinsic too: Uint8Array.from invokes replaceable Symbol.iterator hooks.
+const copyNative=Function.prototype.call.bind(Uint8Array.prototype.set);
+const taPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const taBuffer=Object.getOwnPropertyDescriptor(taPrototype,"buffer").get;
+const taOffset=Object.getOwnPropertyDescriptor(taPrototype,"byteOffset").get;
+const taLength=Object.getOwnPropertyDescriptor(taPrototype,"byteLength").get;
+const dvBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dvOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const dvLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
+const abLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+const sabLength=typeof SharedArrayBuffer==="function"?
+ Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,"byteLength").get:null;
+const isRealBacking=(getter,value)=>{try{getter?.call(value);return !!getter}catch{return false}};
+function viewBacking(view){
+ if(!ArrayBuffer.isView(view))return null;
+ try{return {buffer:taBuffer.call(view),offset:taOffset.call(view),length:taLength.call(view)}}
+ catch{return {buffer:dvBuffer.call(view),offset:dvOffset.call(view),length:dvLength.call(view)}}
+}
+
 /* Worker adapters may detach/transfer postMessage frames. A failed scrub
  * must never abort terminalization, release the incarnation lease early, or
  * turn a successful receipt into a second actor execution. */
+// Scrubbing must not depend on a mutable fill prototype or shadowed view slots.
+const scrubNative=Function.prototype.call.bind(Uint8Array.prototype.fill);
 function scrubOwned(value) {
  if(value===null||value===undefined)return;
  try {
-  const bytes=value instanceof ArrayBuffer?new Uint8Array(value):
-   ArrayBuffer.isView(value)?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):null;
-  if(bytes&&!(typeof SharedArrayBuffer!=="undefined"&&bytes.buffer instanceof SharedArrayBuffer))
-   bytes.fill(0);
+  let backing,offset=0,length;
+  if(isRealBacking(abLength,value)){
+   backing=value;length=abLength.call(value);
+  }else{
+   const slots=viewBacking(value);
+   if(!slots)return;
+   ({buffer:backing,offset,length}=slots);
+  }
+  if(!isRealBacking(abLength,backing)||isRealBacking(sabLength,backing))return;
+  scrubNative(new Uint8Array(backing,offset,length),0);
  }catch{
   // Detached host allocations can no longer be read or written.
  }
@@ -31,18 +61,13 @@ export function createActorMessageTransport({
  schemaId,descriptor,capacity=16,timeoutMs=5000,workerFactory,onSupervisorPanic,
  guest,actorKey,maxFrameBytes=1048576,maxReservedBytes=4194304
 }={}){
- // Validate bounded INIT metadata and full descriptor grammar before
- // worker creation, guest-copy allocation, or any user-visible admission.
- if(typeof schemaId!=="string"||typeof descriptor!=="string"||
-    schemaId.length<1||schemaId.length>256||
-    descriptor.length<1||descriptor.length>4096||
-    !/^[\x21-\x7e]+$/.test(schemaId)||
-    !/^[\x21-\x7e]+$/.test(descriptor)||
-    new TextEncoder().encode(schemaId).length>256||
-    new TextEncoder().encode(descriptor).length>4096)
-  fail("invalid schema or descriptor byte budget");
+ // Use the exact canonical codec grammar for both host preflight and Worker
+ // INIT. In particular this rejects malformed nesting before carrier creation.
  try{validateActorMessageV2Contract({schemaId,descriptor})}
- catch{fail("invalid schema or descriptor shape")}
+ catch(error){
+  const budget=/invalid schema ID|invalid shape descriptor/.test(String(error?.message||""));
+  fail(budget?"invalid schema or descriptor byte budget":"invalid schema or descriptor shape");
+ }
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>4096)fail("invalid capacity");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)fail("invalid deadline");
  if(!Number.isSafeInteger(maxFrameBytes)||maxFrameBytes<64||maxFrameBytes>1048576)fail("invalid frame byte budget");
@@ -62,15 +87,17 @@ export function createActorMessageTransport({
      !guest.manifest||typeof guest.manifest!=="object")
    fail("compiled actor guest requires i64 descriptor and manifest");
   const supplied=guest.wasmBytes;
-  if(typeof SharedArrayBuffer!=="undefined"&&
-     (supplied instanceof SharedArrayBuffer||
-      ArrayBuffer.isView(supplied)&&supplied.buffer instanceof SharedArrayBuffer))
+  const viewInfo=ArrayBuffer.isView(supplied)?viewBacking(supplied):null;
+  // Check actual internal backing slots, never replaceable .buffer accessors.
+  if(isRealBacking(sabLength,supplied)||
+     (viewInfo&&isRealBacking(sabLength,viewInfo.buffer)))
    fail("actor guest shared memory forbidden");
-  const view=supplied instanceof ArrayBuffer?new Uint8Array(supplied):
-   ArrayBuffer.isView(supplied)?new Uint8Array(supplied.buffer,supplied.byteOffset,supplied.byteLength):null;
+  const view=isRealBacking(abLength,supplied)?new Uint8Array(supplied):
+   viewInfo?new Uint8Array(viewInfo.buffer,viewInfo.offset,viewInfo.length):null;
   if(!view||!view.byteLength||view.byteLength>16*1024*1024)
    fail("actor guest Wasm byte budget");
-  guestBytes=Uint8Array.from(view);
+  guestBytes=new Uint8Array(view.byteLength);
+  copyNative(guestBytes,view);
  }
  // Generation-fenced local actor lease. No second Worker with the same
  // supervisor-provided actor identity can be spawned while retirement is
@@ -137,8 +164,12 @@ export function createActorMessageTransport({
   // void from terminate(): that alone does not prove the old guest exited.
   // Only an exact, validated STOPPED receipt after teardown proves quiescence
   // for the synchronous actor protocol in a non-awaitable Worker adapter.
-  if(termination&&typeof termination.then==="function")
-   return Promise.resolve(termination).then(release);
+  // A custom Worker adapter may return a poisoned thenable. A throwing
+  // .then getter must reject completion, not escape synchronously from cleanup.
+  let thenable=false;
+  try{thenable=termination!==null&&termination!==undefined&&typeof termination.then==="function";}
+  catch(error){return Promise.reject(error);}
+  if(thenable)return Promise.resolve(termination).then(release);
   if(actorKey!==undefined&&!guestQuiesced)
    return Promise.reject(Error("nonawaitable Worker termination did not confirm actor retirement"));
   release();
@@ -210,7 +241,8 @@ export function createActorMessageTransport({
  }
  const onMessage=event=>{
   if(finished)return;
-  const m=event?.data;
+  try {
+   const m=event?.data;
   if(!m||typeof m!=="object")return fatal(Error("invalid actor worker message"));
   if(incarnation!==null&&m.incarnation!==incarnation)
    return fatal(Error("stale or forged actor incarnation response"));
@@ -229,6 +261,11 @@ export function createActorMessageTransport({
    complete(null,true,true);return
   }
   fatal(Error("invalid actor worker lifecycle or receipt"));
+  } catch {
+   // Even synthetic or malformed Worker accessors must terminate the
+   // carrier, not escape as an uncaught event and strand get_done().
+   fatal(Error("invalid actor worker message"));
+  }
  };
  try{
   worker.addEventListener("message",onMessage);

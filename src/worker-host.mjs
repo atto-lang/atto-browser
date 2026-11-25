@@ -1,3 +1,4 @@
+import {snapshotCoreManifest} from "./core-manifest-snapshot.mjs";
 /**
  * Single-shot browser Worker admission for a SHA-256 pinned core-i64 Wasm guest.
  * This is isolation for pure scalar guests, NOT an Oreslang actor runtime.
@@ -5,15 +6,40 @@
  */
 const signedI64=/^(?:0|-?[1-9][0-9]*)$/;
 const fail=x=>{throw new TypeError("Oreslang Worker: "+x)};
-function snapshotBytes(input){
+// Capture native internal-slot getters: instanceof and the public view.buffer
+// accessor can both be forged, including on a SharedArrayBuffer-backed view.
+const ordinaryBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+// Uint8Array.from reads an overrideable @@iterator on guest-supplied views.
+const copyNative=Function.prototype.call.bind(Uint8Array.prototype.set);
+const typedViewPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const typedViewBuffer=Object.getOwnPropertyDescriptor(typedViewPrototype,"buffer").get;
+const typedViewOffset=Object.getOwnPropertyDescriptor(typedViewPrototype,"byteOffset").get;
+const typedViewLength=Object.getOwnPropertyDescriptor(typedViewPrototype,"byteLength").get;
+const dataViewBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dataViewOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const dataViewLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
+function isOrdinaryBuffer(value) {
+ try { ordinaryBufferLength.call(value); return true; } catch { return false; }
+}
+function snapshotBytes(input,maxModuleBytes){
  let bytes;
- if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
+ if(isOrdinaryBuffer(input))bytes=new Uint8Array(input);
  else if(ArrayBuffer.isView(input)) {
-  if(typeof SharedArrayBuffer!=="undefined" && input.buffer instanceof SharedArrayBuffer)
-   fail("shared memory not admitted");
-  bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
+  let buffer,offset,length;
+  try {
+   const dataView=input instanceof DataView;
+   buffer=(dataView?dataViewBuffer:typedViewBuffer).call(input);
+   offset=(dataView?dataViewOffset:typedViewOffset).call(input);
+   length=(dataView?dataViewLength:typedViewLength).call(input);
+  }catch{fail("invalid or detached Wasm byte view")}
+  if(!isOrdinaryBuffer(buffer))fail("shared memory not admitted");
+  bytes=new Uint8Array(buffer,offset,length);
  }else fail("expected Wasm ArrayBuffer or typed array");
- return Uint8Array.from(bytes);
+ if(bytes.byteLength>maxModuleBytes)fail("Wasm module exceeds host byte budget");
+ // Copy raw internal slots without invoking an untrusted @@iterator.
+ const snapshot=new Uint8Array(bytes.byteLength);
+ copyNative(snapshot,bytes);
+ return snapshot;
 }
 function validInt(x,min,max,name){
  if(!Number.isSafeInteger(x)||x<min||x>max)fail("invalid "+name);
@@ -21,8 +47,10 @@ function validInt(x,min,max,name){
 }
 export function runVerifiedCoreGuestInWorker({
  wasmBytes,manifest,workerFactory,signal,
- timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32
+ timeoutMs=5000,maxModuleBytes=1048576,maxMemoryPages=32,
+ sealedExports=false
 }={}){
+ if(typeof sealedExports!=="boolean")fail("sealedExports must be a boolean");
  validInt(timeoutMs,1,30000,"timeoutMs");
  validInt(maxModuleBytes,8,1048576,"maxModuleBytes");
  validInt(maxMemoryPages,1,256,"maxMemoryPages");
@@ -32,11 +60,9 @@ export function runVerifiedCoreGuestInWorker({
  // An already aborted request must not create a Worker or allocate guest memory.
  if(signal?.aborted)return Promise.reject(new Error("isolated Wasm worker aborted"));
  // Snapshot before any worker creation, event registration or async operation.
- const bytes=snapshotBytes(wasmBytes);
+ const bytes=snapshotBytes(wasmBytes,maxModuleBytes);
  if(bytes.length>maxModuleBytes)fail("Wasm module exceeds host byte budget");
- let admittedManifest;
- try{admittedManifest=JSON.parse(JSON.stringify(manifest));}
- catch{fail("invalid artifact manifest serialization");}
+ const admittedManifest=snapshotCoreManifest(manifest);
  if(!admittedManifest||typeof admittedManifest!=="object"||Array.isArray(admittedManifest))
   fail("invalid artifact manifest");
  const create=workerFactory||(()=>{
@@ -66,17 +92,35 @@ export function runVerifiedCoreGuestInWorker({
   };
   const onError=()=>settle(new Error("isolated Wasm worker failed"));
   const onMessage=event=>{
+   try {
    const data=event?.data;
-   if(!data||data.kind!=="oreslang-core-result-v1"||typeof data.ok!=="boolean")
+   // Trust only own data properties from the cloned Worker reply. Reading
+   // inherited fields can turn a prototype-polluted empty object into a
+   // forged success; reading accessors executes caller-controlled code.
+   if(!data||typeof data!=="object"||Array.isArray(data))
     return settle(new Error("invalid isolated Wasm worker response"));
-   if(!data.ok)return settle(new Error("verified Wasm guest execution rejected"));
-   const str=data.value;
+   const kind=Object.getOwnPropertyDescriptor(data,"kind");
+   const ok=Object.getOwnPropertyDescriptor(data,"ok");
+   if(!kind||!Object.hasOwn(kind,"value")||
+      kind.value!=="oreslang-core-result-v1"||
+      !ok||!Object.hasOwn(ok,"value")||typeof ok.value!=="boolean")
+    return settle(new Error("invalid isolated Wasm worker response"));
+   if(!ok.value)return settle(new Error("verified Wasm guest execution rejected"));
+   const ownedValue=Object.getOwnPropertyDescriptor(data,"value");
+   if(!ownedValue||!Object.hasOwn(ownedValue,"value"))
+    return settle(new Error("invalid isolated Wasm worker response"));
+   const str=ownedValue.value;
    if(typeof str!=="string"||str.length>20||!signedI64.test(str))
     return settle(new Error("invalid signed i64 Worker result"));
    const value=BigInt(str);
    if(value<-(1n<<63n)||value>(1n<<63n)-1n)
     return settle(new Error("out-of-range signed i64 Worker result"));
    settle(null,value);
+   } catch {
+    // Synthetic or misbehaving Worker event accessors must settle the promise,
+    // never escape as an uncaught message handler exception.
+    settle(new Error("invalid isolated Wasm worker response"));
+   }
   };
   try{
    worker=create();
@@ -100,7 +144,7 @@ export function runVerifiedCoreGuestInWorker({
    // Deliberately omit transfer list: guest module bytes have copy semantics.
    if(done)return;
    worker.postMessage({kind:"oreslang-core-run-v1",wasmBytes:bytes,
-    manifest:admittedManifest,maxModuleBytes,maxMemoryPages});
+    manifest:admittedManifest,maxModuleBytes,maxMemoryPages,sealedExports});
   }catch(error){settle(error)}
  });
 }

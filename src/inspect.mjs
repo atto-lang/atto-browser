@@ -1,3 +1,16 @@
+const ordinaryBufferLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get;
+// Do not consume caller-supplied Symbol.iterator when copying a validated view.
+const copyNative=Function.prototype.call.bind(Uint8Array.prototype.set);
+function isOrdinaryBuffer(buffer){
+ try{ordinaryBufferLength.call(buffer);return true;}catch{return false;}
+}
+const typedPrototype=Object.getPrototypeOf(Uint8Array.prototype);
+const viewBuffer=Object.getOwnPropertyDescriptor(typedPrototype,"buffer").get;
+const viewOffset=Object.getOwnPropertyDescriptor(typedPrototype,"byteOffset").get;
+const viewLength=Object.getOwnPropertyDescriptor(typedPrototype,"byteLength").get;
+const dataBuffer=Object.getOwnPropertyDescriptor(DataView.prototype,"buffer").get;
+const dataOffset=Object.getOwnPropertyDescriptor(DataView.prototype,"byteOffset").get;
+const dataLength=Object.getOwnPropertyDescriptor(DataView.prototype,"byteLength").get;
 /**
  * Small, bounded reader for the pieces of core Wasm required to enforce
  * loader policy. This is *not* a general Wasm parser or execution sandbox.
@@ -7,13 +20,27 @@ export function inspectWasmBytes(input,{maxModuleBytes=1048576,maxMemoryPages=32
  if(!Number.isSafeInteger(maxMemoryPages)||maxMemoryPages<1||maxMemoryPages>256)throw new TypeError("invalid maximum memory pages");
  if(input instanceof WebAssembly.Module)throw new TypeError("precompiled WebAssembly.Module cannot be inspected: provide original bytes");
  let bytes;
- if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
- else if(ArrayBuffer.isView(input))bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
+ // Trust the intrinsic ArrayBuffer slot, never a spoofable prototype chain.
+ // A SharedArrayBuffer can have its prototype replaced with ArrayBuffer.prototype.
+ if(isOrdinaryBuffer(input))bytes=new Uint8Array(input);
+ else if(ArrayBuffer.isView(input)){
+  // A concurrently writable SharedArrayBuffer can race input admission.
+  // Only caller-owned, non-shared bytes may be snapshotted for verification.
+  const dataView=input instanceof DataView;
+  const buffer=(dataView?dataBuffer:viewBuffer).call(input);
+  const offset=(dataView?dataOffset:viewOffset).call(input);
+  const length=(dataView?dataLength:viewLength).call(input);
+  if(!isOrdinaryBuffer(buffer))
+   throw new TypeError("shared Wasm input memory is not admitted");
+  bytes=new Uint8Array(buffer,offset,length);
+ }
  else throw new TypeError("expected a Wasm ArrayBuffer or typed array");
  if(bytes.byteLength>maxModuleBytes)throw new Error("Wasm module exceeds maximum byte size");
  // Snapshot any supplied view before inspecting; never validate bytes that can
  // change between admission and WebAssembly.Module compilation (TOCTOU).
- bytes=Uint8Array.from(bytes);
+ const owned=new Uint8Array(bytes.byteLength);
+ copyNative(owned,bytes);
+ bytes=owned;
  const fail=message=>{throw new Error("Wasm admission denied: "+message)};
  if(bytes.length<8||bytes[0]!==0||bytes[1]!==97||bytes[2]!==115||bytes[3]!==109||
     bytes[4]!==1||bytes[5]!==0||bytes[6]!==0||bytes[7]!==0)fail("invalid core module header");
