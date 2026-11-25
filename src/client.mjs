@@ -73,7 +73,7 @@ export class BrowserTenantClient {
   // JS modules are trusted same-origin code, never a security sandbox.
   spawn(tenant, { backend = 'wasm', entry, trusted = false, owner, sha256 } = {}) {
     return this.#request('spawn', { tenant: assert_tenant_id(tenant), backend, entry, trusted,
-      ...(backend==='receiver' ? {owner,sha256} : {}) });
+      ...(['receiver','stateful-preview'].includes(backend) ? {owner,sha256} : {}) });
   }
   // A tenant name alone is not authority. Reuse only a current spawn/ready handle.
   #handle(handle) {
