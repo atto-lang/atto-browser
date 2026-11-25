@@ -43,7 +43,7 @@ AttoLang is the canonical project name; new source, examples and documentation u
 
 ## Legacy provenance and transfer verification
 
-The historical predecessor was `ores-truffle-oreslang/oreslang-web-browser.ores`. The present checkout is `atto-lang/atto-browser`; matching names or imported history do not prove preserved numeric repository identity or runtime parity. Preserve working legacy `.ores` inputs and historical package/CLI aliases until compiler-backed replacements and consumers are verified. New source follows canonical `.atto` contracts.
+Related historical browser projects include `ores-truffle-oreslang/oreslang-web-browser.ores` and `ores-truffle-oreslang/oreslang-browser`; their identities and migration histories must be verified separately. The present checkout is `atto-lang/atto-browser`; matching names or imported history do not prove preserved numeric repository identity or runtime parity. Preserve working legacy `.ores` inputs and historical package/CLI aliases until compiler-backed replacements and consumers are verified. New source follows canonical `.atto` contracts.
 
 Browser APIs, embedding and UI experiments belong here; browser-engine security certification and managed browser services do not. [atto-lang](https://github.com/atto-lang) maintains language, portable libraries and tooling; [atto-co](https://github.com/atto-co) separately governs commercial deployment, tenancy, identity and billing. Further original-ID transfers or commercial carve-outs require separate owner authorization and independent security review. This document authorizes no transfer or private-source mirror.
 
