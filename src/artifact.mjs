@@ -43,7 +43,11 @@ async function digest(bytes){
  * The host must still impose CPU/fuel and worker termination policy.
  * Manifests do not prove source-language effects or compiler provenance.
  */
-export async function loadVerifiedCoreGuest(rawBytes,manifest,{maxModuleBytes=1048576,maxMemoryPages=32}={}){
+export async function loadVerifiedCoreGuest(rawBytes,manifest,{
+ maxModuleBytes=1048576,maxMemoryPages=32,sealedExports=false
+}={}){
+ if (typeof sealedExports!=="boolean")
+  throw new TypeError("sealedExports must be a boolean");
  const m=checkManifest(manifest);
  const checked=inspectWasmBytes(rawBytes,{maxModuleBytes,maxMemoryPages});
  if(checked.bytes.length!==m.wasmBytes)throw new Error("core Wasm artifact byte length mismatch");
@@ -55,6 +59,19 @@ export async function loadVerifiedCoreGuest(rawBytes,manifest,{maxModuleBytes=10
  if(WebAssembly.Module.imports(module).length!==0)throw new Error("core Wasm guest imports forbidden");
  if(!WebAssembly.Module.exports(module).some(x=>x.name===m.entry&&x.kind==="function"))
   throw new Error("core Wasm entry export missing");
+ // The strict scalar AOT profile has a closed export surface:
+ // exactly main() and one private memory. Reject debug/injected exports
+ // before host instantiation so they cannot accidentally become a
+ // guest-visible capability or an open-world tree-shake root.
+ if(sealedExports){
+  if(m.entry!=="main")
+   throw new Error("sealed scalar AOT requires exact main entry");
+  const all=WebAssembly.Module.exports(module);
+  if(all.length!==2 ||
+     !all.some(x=>x.name==="main"&&x.kind==="function") ||
+     !all.some(x=>x.name==="memory"&&x.kind==="memory"))
+    throw new Error("sealed scalar AOT requires only main and memory exports");
+ }
  // Check the actual Wasm function type, not merely its export name.
  assertCoreI64Entry(checked.bytes,m.entry);
  const {instance}=await loadOreslangWasm(checked.bytes,{

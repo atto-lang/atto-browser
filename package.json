@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     "./loader": "./src/loader.mjs",
-    "./owned-actor": "./src/owned-actor-host.mjs"
+    "./owned-actor": "./src/owned-actor-host.mjs",
+    "./native-wasm-data-v0": "./src/native-wasm-data-v0.mjs"
   },
   "engines": {
     "node": ">=22"

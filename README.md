@@ -1,46 +1,58 @@
-# Oreslang browser host
+> **AI agent instructions (organization-wide):** Before working on code, issues, or pull requests, read and follow the [organization `AGENTS.md`](https://github.com/atto-lang/.github/blob/main/AGENTS.md), including its **merge-first stealth-development policy**. Honor any repository-local `AGENTS.md`, explicit holds, and GitHub-enforced rules.
 
-**Status:** real tested browser-compatible **WebAssembly host loader prototype**, not a browser Oreslang compiler, JavaScript backend, actor scheduler, DOM bridge, or completed security sandbox.
+# atto-browser
 
-This package loads **raw core Wasm bytes** using the standard WebAssembly API, rejects modules with start sections, tables, unbounded or over-budget linear memory, oversized binaries, or unexpected host imports **before instantiation**, and exposes an explicitly requested and independently granted clock import. Passing a precompiled `WebAssembly.Module` is intentionally rejected because its source bytes cannot be inspected. Neither browser global access nor a source header grants anything.
+Browser runtime APIs and JavaScript interoperability for AttoLang applications.
 
-## Quick start
+## Naming migration and language authority
 
-~~~sh
-npm test
-~~~
+This repository is maintained at [atto-lang/atto-browser](https://github.com/atto-lang/atto-browser); use `https://github.com/atto-lang/atto-browser.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
 
-~~~js
-import { loadOreslangWasm } from "./src/loader.mjs";
-const bytes = await (await fetch("./oreslang_rt.wasm")).arrayBuffer();
-const result = await loadOreslangWasm(bytes, {
-  requestedCapabilities: ["clock"],
-  grantedCapabilities: ["clock"],
-  host: { clockMs: () => performance.now() }
-});
-console.log(result.instance.exports.ores_rt_abi_version());
-~~~
+## Scope
 
-The wasm32 binary must be built separately, currently with the C ABI prototype in oreslang-wasm (npm run build); copy its build/oreslang_rt.wasm into the example directory for a local static HTTP server. This does **not** compile an Oreslang .ores program.
+Browser integration APIs, worker interoperability, and web security boundaries.
 
-**Important:** This is not an untrusted-Wasm isolation sandbox. A synchronous Wasm function can consume unbounded CPU, and export calls can perform arbitrary computations before they return. Host applications should run untrusted guests in independently terminable Workers and enforce CPU/size limits. No actor or full sandbox guarantee is claimed.
+## Compatibility and design
 
-Runtime admission principles:
-- Request and grant are distinct. Requested capabilities must be a subset of independent host grants.
-- Imports are inspected with WebAssembly.Module.imports and only the pinned ores_host.clock_ms function is accepted by this v0 adapter.
-- Even if a guest calls exported initialization itself, clockMs checks the host-side grant at call time.
-- Imports of memory, tables, arbitrary JS modules, filesystem, network, threading or raw DOM are refused.
-- The static target profiles registry is not a permission oracle; the embedding application owns the grants.
+This package is intended to integrate with [AttoLang](https://github.com/atto-lang) while clearly separating portable language behavior from backend- and host-specific features. Document APIs, target restrictions, and security/trust boundaries.
 
-Next: link the real compiler's Wasm output, browser Web Worker actor scheduler, async host adapters, DOM APIs under capabilities, and conformance runs. This prototype makes none of those claims.
+## Development and verification
 
-## Repository ownership and migration (2026-11-08)
+Refer to checked-in sources and CI workflows for verified build and test commands. Include platform-specific execution tests and publish exact-commit evidence before asserting backend parity or production readiness.
 
-The language is publicly **AttoLang** (formerly Oreslang), while the repository remains `ores-truffle-oreslang/oreslang-browser`. Keep supported `.ores` source, historical import/package IDs and command names working unless a reviewed compatibility change proves replacements.
+## Project status
 
-- **Belongs here:** client/browser AttoLang integration, DOM adapters and web packaging experiments.
-- **Explicitly out of scope:** claiming complete secure browser engine isolation.
-- **Organization split:** [atto-lang](https://github.com/atto-lang) maintains the compiler, portable language libraries and demo ecosystem; [atto-co](https://github.com/atto-co) handles independently governed commercial cloud hosting, tenant identity, billing, deployment control, networking and infrastructure. Related `atto-*` repos are not assumed transferred copies.
-- **Proposed first move:** transfer this **same GitHub repository** to `atto-lang/oreslang-browser`, preserving numeric ID, name and Git history, after individual authorizations. No direct old-org transfer to `atto-co` is authorized now. Future product spinouts need a separate decision.
+This README describes the intended repository scope and does not imply implemented functionality or verified target coverage.
 
-**Migration and security checklist:** post ownership claim to [coordination issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26); follow private [runbook draft #25](https://github.com/ores-truffle-oreslang/.github/pull/25). Record ID, exact head SHA/tree, PR/release/package consumers, Apps/webhooks, Pages, secrets, Actions/runners, branch/ruleset enforcement, target visibility/access, source/target admin approval, independent security review and rollback owner. Never mirror private source to evade a blocked transfer. Verify unchanged identity/history/tree and re-enable protections after the authorized GitHub transfer, then update external references and run exact-head CI. Jobs with zero executed steps (`steps=[]`/`null`) are `NOT_EXECUTED`, not success. Host-only and static tests do not prove native AttoLang guest or production networking capabilities.
+## Related
+
+- [Language specification](https://github.com/atto-lang/atto-spec)
+- [Platform conformance](https://github.com/atto-lang/atto-platform-conformance)
+
+## Repository ownership and contribution routing
+
+**Belongs here:** Reusable browser-facing AttoLang APIs, DOM and Web Worker interop, capability-scoped host bridges and browser lifecycle adapters.
+
+**Belongs elsewhere:** JS lowering belongs in atto-source.js, Wasm compiler/runtime lowering in atto-source.wasm, the playground UI/release in atto-playground.
+
+**Security and portability boundary:** Browser worker boundaries are not per-actor memory protection by themselves. Validate messages, bound quotas, reject unsafe host imports, and handle worker termination/cancellation races.
+
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
+
+**Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Legacy provenance and transfer verification
+
+The historical predecessor was `ores-truffle-oreslang/oreslang-web-browser.ores`. The present checkout is `atto-lang/atto-browser`; matching names or imported history do not prove preserved numeric repository identity or runtime parity. Preserve working legacy `.ores` inputs and historical package/CLI aliases until compiler-backed replacements and consumers are verified. New source follows canonical `.atto` contracts.
+
+Browser APIs, embedding and UI experiments belong here; browser-engine security certification and managed browser services do not. [atto-lang](https://github.com/atto-lang) maintains language, portable libraries and tooling; [atto-co](https://github.com/atto-co) separately governs commercial deployment, tenancy, identity and billing. Further original-ID transfers or commercial carve-outs require separate owner authorization and independent security review. This document authorizes no transfer or private-source mirror.
+
+Before an authorized transfer, coordinate in [migration issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26) and review the authorized runbook. Record source and target administrators, numeric repository ID, exact SHA/tree, history, visibility, access and rulesets, PRs/issues, releases, packages, consumers, CI/runners, secrets, deploy keys, apps, webhooks, Pages and rollback ownership. Verify unchanged ID/history/tree and restored controls after transfer, then execute exact-head tests before changing consumers. Zero-step jobs are NOT_EXECUTED; host-only and source-free checks do not certify compiled guest execution or production capabilities.
+
+## Legacy provenance and migration guardrails
+
+The historical predecessor `ores-truffle-oreslang/oreslang-browser` is archived; the current `atto-lang/atto-browser` has a separate numeric GitHub identity. Preserve supported legacy `.ores` inputs and historical package, CLI and API identifiers until compiler-backed replacements are verified. New language source follows the canonical `.atto` [grammar](https://github.com/atto-lang/atto-spec/blob/main/spec/01-source-and-syntax.md) and [ownership contract](https://github.com/atto-lang/atto-spec/blob/main/spec/04-ownership-and-memory.md).
+
+Client/browser Atto integration, DOM adapters and web packaging experiments belong here; complete browser engine isolation must not be inferred from experimental adapters. [atto-lang](https://github.com/atto-lang) owns language, portable libraries and tooling; [atto-co](https://github.com/atto-co) separately governs managed hosting, deployment, tenant identity and billing. Further original-ID transfers or product carve-outs require separate owner authorization and independent security review.
+
+Before an authorized transfer, record exact SHA/tree, numeric ID, source/target administrators, access, branch protections, releases, PRs, packages, dependencies, runners, secrets, apps, webhooks, Pages and rollback ownership. Verify identity, history and controls afterward, and retest consumer references. Never mirror private source without authorization. Empty or null steps are NOT_EXECUTED; host or structural checks cannot establish compiled guest execution or parity.
