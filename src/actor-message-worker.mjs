@@ -5,7 +5,13 @@
  */
 import {decodeActorMessageV2,validateActorMessageV2Contract} from "./messagepack-v2.mjs";
 let ready=false,closed=false,handling=false,stopPending=false,initializing=false,contract,lastTicket=0;
-let guestHandler=null,actorIncarnation=null;
+let guestHandler=null,guestTeardown=null,actorIncarnation=null;
+function disposeGuest(){
+ const teardown=guestTeardown;
+ guestTeardown=null;
+ guestHandler=null;
+ if(teardown)teardown();
+}
 const tagged=message=>({ ...message,
  ...(actorIncarnation===null?{}:{incarnation:actorIncarnation}) });
 const MAX_WASM_BYTES=16*1024*1024;
@@ -61,7 +67,9 @@ async function loadActorGuest({wasmBytes,manifest}={}){
  const bytes=Uint8Array.from(view);
  try{
   const actor=manifest.actor;
-  if(manifest.schemaVersion!==1||manifest.artifactType!=="oreslang.core-wasm.actor-i64-v1"||
+  const v1=manifest.artifactType==="oreslang.core-wasm.actor-i64-v1";
+  const v2=manifest.artifactType==="oreslang.core-wasm.actor-i64-v2";
+  if(manifest.schemaVersion!==1||(!v1&&!v2)||
     manifest.target!=="wasm32"||manifest.environment!=="browser"||
     !Array.isArray(manifest.imports)||manifest.imports.length!==0||
     !Array.isArray(manifest.requiredCapabilities)||manifest.requiredCapabilities.length!==0||
@@ -69,28 +77,41 @@ async function loadActorGuest({wasmBytes,manifest}={}){
     !/^[0-9a-f]{64}$/.test(manifest.wasmSha256||"")||
     !actor||typeof actor.name!=="string"||
     !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(actor.name)||
-    actor.init!=="oreslang_actor_"+actor.name+"_init"||
-    actor.onMessage!=="oreslang_actor_"+actor.name+"_on_message"||
+    (v1&&(actor.init!=="oreslang_actor_"+actor.name+"_init"||
+          actor.onMessage!=="oreslang_actor_"+actor.name+"_on_message"||
+          actor.teardown!==undefined||actor.lifecycle!==undefined))||
+    (v2&&(actor.init!=="oreslang_wasm_actor_init"||
+          actor.onMessage!=="oreslang_wasm_actor_on_message"||
+          actor.teardown!=="oreslang_wasm_actor_teardown"||
+          actor.lifecycle!=="NEW-ACTIVE-STOPPED"))||
     actor.messageShape!=="I"||actor.instancesPerActor!==1||
     manifest.entry!==actor.onMessage)throw Error("invalid actor Wasm manifest");
   const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",bytes));
   const hex=Array.from(digest,b=>b.toString(16).padStart(2,"0")).join("");
+  if(closed)throw Error("actor terminated during guest Wasm digest");
   if(hex!==manifest.wasmSha256)throw Error("actor Wasm source hash mismatch");
   if(!WebAssembly.validate(bytes)||hasStartSection(bytes))
    throw Error("invalid or start-bearing actor Wasm");
   const module=await WebAssembly.compile(bytes);
+  if(closed)throw Error("actor terminated during guest Wasm compilation");
   if(WebAssembly.Module.imports(module).length)
    throw Error("actor Wasm host imports forbidden");
   const exports=WebAssembly.Module.exports(module);
-  if(![actor.init,actor.onMessage].every(name=>
+  const required=v2?[actor.init,actor.onMessage,actor.teardown]:[actor.init,actor.onMessage];
+  if(!required.every(name=>
       exports.some(x=>x.name===name&&x.kind==="function")))
    throw Error("missing actor Wasm exports");
   const instance=await WebAssembly.instantiate(module);
   const init=instance.exports[actor.init],handle=instance.exports[actor.onMessage];
+  const teardown=v2?instance.exports[actor.teardown]:null;
   if(typeof init!=="function"||init.length!==0||
-     typeof handle!=="function"||handle.length!==1)
+     typeof handle!=="function"||handle.length!==1||
+     (v2&&(typeof teardown!=="function"||teardown.length!==0)))
    throw Error("wrong actor Wasm function arity");
   if(closed)throw Error("actor terminated during Wasm initialization");
+  // Take cleanup ownership before init; a partially initialized v2 instance
+  // must not leave a second cleanup path or an executable handler.
+  guestTeardown=teardown;
   init();
   return handle;
  }finally{bytes.fill(0);scrubOwnedFrame(wasmBytes)}
@@ -139,7 +160,11 @@ self.addEventListener("message",async event=>{
    }
    actorIncarnation=data.incarnation;
    if(data.descriptor!=="I"){scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
-   try{guestHandler=await loadActorGuest(data.guest)}
+   try{
+    const handler=await loadActorGuest(data.guest);
+    if(closed)return;
+    guestHandler=handler;
+   }
    catch{scrubOwnedFrame(data.guest?.wasmBytes);return panic()}
   }
   if(closed)return;
@@ -158,8 +183,8 @@ self.addEventListener("message",async event=>{
  if(data.kind==="oreslang-v2-control"&&data.action==="drain"){
   stopPending=true;
   if(!handling){
+   try{disposeGuest()}catch{return panic()}
    closed=true;
-   guestHandler=null;
    self.postMessage(tagged({kind:"oreslang-v2-stopped"}))
   }
   return;
@@ -196,8 +221,8 @@ self.addEventListener("message",async event=>{
   scrubOwnedFrame(data.frame);
   handling=false;
   if(stopPending&&!closed){
+   try{disposeGuest()}catch{return panic()}
    closed=true;
-   guestHandler=null;
    self.postMessage(tagged({kind:"oreslang-v2-stopped"}))
   }
  }
@@ -206,7 +231,7 @@ function panic(){
  if(closed)return;closed=true;
  // Revoke the compiled handler immediately. Even a pending decoder must not
  // retain an executable actor entry point after terminal shutdown.
- guestHandler=null;
+ try{disposeGuest()}catch{}
  // No user-defined actor hook may intercept this terminal CONTROL failure.
  self.postMessage(tagged({kind:"oreslang-v2-panic"}));
 }

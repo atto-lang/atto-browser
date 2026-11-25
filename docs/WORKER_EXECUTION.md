@@ -137,3 +137,14 @@ state before running compiler-generated actor initialization.
 These guarantees cover a **single JavaScript agent** and its dedicated Worker.
 They do not establish cross-tab or distributed actor fencing, arbitrary
 async cancellation of CPU-bound Wasm guest code, or Java/GraalVM parity.
+
+## Explicit versioned MessagePack actor artifacts
+
+The MessagePack endpoint retains actor-specific v1 export names. The opt-in
+actor-i64-v2 manifest instead requires the fixed init/on_message/teardown
+exports and NEW-ACTIVE-STOPPED lifecycle. Manifest version and exports must
+agree; no implicit reinterpretation is allowed. V2 cleanup ownership is
+revoked before teardown, and initialization checks terminal state at digest,
+compile and instance admission boundaries. V1 remains supported without a
+teardown export. Synthetic ABI fixtures are host tests only; compiler-generated
+v2 guest verification remains a separate required gate.
