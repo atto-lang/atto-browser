@@ -1,0 +1,17 @@
+{
+  "name": "@oreslang/browser",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./loader": "./src/loader.mjs",
+    "./owned-actor": "./src/owned-actor-host.mjs",
+    "./native-wasm-data-v0": "./src/native-wasm-data-v0.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:browser": "node tests/real-browser-e2e.mjs"
+  }
+}
