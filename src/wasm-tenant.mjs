@@ -1,5 +1,6 @@
 import { MAX_ACTORS_PER_TENANT, MAX_MAIL_PER_ACTOR, MAX_STDOUT_BYTES } from './protocol.mjs';
 import { fixed_memory_pages, actor_names, MAX_WASM_BYTES } from './wasm-profile.mjs';
+import { validateGuestImportABI } from './guest-import-abi.js';
 
 export async function read_bounded(response) {
   const declared=Number(response.headers?.get?.('content-length'));
@@ -40,6 +41,9 @@ export async function open_wasm_tenant(entry) {
   if(!WebAssembly.validate(buffer))throw new Error('E_WASM_INVALID');
   const pages=fixed_memory_pages(buffer);
   const module=await WebAssembly.compile(buffer);
+  // Module.imports() exposes names, not signatures. Reject forged imports
+  // before any guest instance or host capability is constructed.
+  validateGuestImportABI(buffer,module,{allowFloat:true});
   const allowed=new Set(['print_i64','print_bool','print_str','print_newline','print_f64','actor_spawn','actor_send']);
   for(const imp of WebAssembly.Module.imports(module)) {
     if(imp.module !== 'atto' || !allowed.has(imp.name) || imp.kind !== 'function') throw new Error('E_WASM_IMPORT');

@@ -2,6 +2,7 @@ import { PROTOCOL, assert_entry_url, error_text, normalize_guest_result,
   normalize_receiver_result } from './protocol.mjs';
 import { open_wasm_tenant } from './wasm-tenant.mjs';
 import { open_receiver_tenant } from './receiver-tenant.mjs';
+import { open_stateful_tenant } from './stateful-tenant.mjs';
 
 const worker_instance=crypto.randomUUID(); // diagnostic identity, not a security capability
 let state=null, booting=false;
@@ -16,6 +17,8 @@ self.onmessage=async({data})=>{
       if(backend==='wasm') state={tenant,generation,backend,busy:false,handler:await open_wasm_tenant(entry)};
       else if(backend==='receiver') state={tenant,generation,backend,busy:false,
         handler:await open_receiver_tenant(entry,data.owner,data.sha256)};
+      else if(backend==='stateful-preview') state={tenant,generation,backend,busy:false,
+        handler:await open_stateful_tenant(entry,data.owner,data.sha256)};
       else if(backend==='js' && trusted===true){
         const module=await import(entry);
         if(typeof module.create_tenant!=='function')throw new Error('E_JS_FACTORY');
@@ -35,7 +38,7 @@ self.onmessage=async({data})=>{
     return;
   }
   if(data.op==='call_receiver' && Number.isSafeInteger(data.id) && data.id>0 &&
-     state.backend==='receiver') {
+     (state.backend==='receiver'||state.backend==='stateful-preview')) {
     if(state.busy) {
       self.postMessage({protocol:PROTOCOL,op:'receiver_result',
         tenant:state.tenant,generation:state.generation,id:data.id,
