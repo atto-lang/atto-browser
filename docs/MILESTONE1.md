@@ -137,3 +137,7 @@ guest manifest includes **16** acceptance programs. The module is
 allocation-backed and O(n) or worse on operations; no preallocated
 arena, authenticated IPC, process launcher or compositor yet.
 See [DYNAMIC_FRAME_REGISTRY.md](DYNAMIC_FRAME_REGISTRY.md).
+
+## Combined native prototype gate
+
+The session lifecycle actor from #30 is preserved with the native registry work, not enabled by the Qt host integration. The combined manifest requires 17 exact-source cases; actual native compiler execution and backend integration remain separate outstanding gates.

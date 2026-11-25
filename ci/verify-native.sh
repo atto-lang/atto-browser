@@ -47,7 +47,7 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
     tests/guest/isolation_policy.ores | tests/guest/site_tenant_policy.ores | \
     tests/guest/frame_routing_policy.ores | src/browser/window_frame_graph.ores | \
     tests/guest/dynamic_frame_registry.ores | \
-    src/browser/window_frame_registry_actor.ores | \
+    src/browser/window_frame_registry_actor.ores | src/browser/session_lifecycle.ores | \
     src/browser/renderer_supervisor.ores | src/browser/browser_supervisor.ores | \
     src/browser/tab_epoch.ores | \
     tests/guest/tab_policy.ores | tests/guest/ui_dispatch_policy.ores | \
@@ -60,7 +60,7 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
   case "$expected" in
     browser:isolation-policy-ok | browser:site-tenant-policy-ok | \
     browser:frame-routing-policy-ok | browser:frame-graph-ok | \
-    browser:dynamic-frame-registry-ok | browser:dynamic-registry-actor-ok | \
+    browser:dynamic-frame-registry-ok | browser:dynamic-registry-actor-ok | browser:session-lifecycle-ok | \
     browser:renderer-supervisor-ok | browser:supervisor-tabs-ok | \
     browser:tab-epoch-ok | \
     browser:desktop-policy-ok | browser:ui-ffi-policy-ok | \
@@ -80,6 +80,7 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
     "src/browser/window_frame_graph.ores|browser:frame-graph-ok") ;;
     "tests/guest/dynamic_frame_registry.ores|browser:dynamic-frame-registry-ok") ;;
     "src/browser/window_frame_registry_actor.ores|browser:dynamic-registry-actor-ok") ;;
+    "src/browser/session_lifecycle.ores|browser:session-lifecycle-ok") ;;
     "src/browser/renderer_supervisor.ores|browser:renderer-supervisor-ok") ;;
     "src/browser/browser_supervisor.ores|browser:supervisor-tabs-ok") ;;
     "src/browser/tab_epoch.ores|browser:tab-epoch-ok") ;;
@@ -101,6 +102,6 @@ while IFS='|' read -r source expected || [ -n "$source" ]; do
   count=$((count + 1))
   printf 'NATIVE_CASE_PASS path=%s source_blob=%s\n' "$source" "$(git rev-parse "HEAD:$source")"
 done < ci/native-cases.txt
-[ "$count" -eq 16 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
-[ "$(wc -l < "$tmp/seen" | tr -d ' ')" -eq 16 ] || die "NATIVE_DUPLICATE_COVERAGE"
+[ "$count" -eq 17 ] || die "NATIVE_CASE_COVERAGE_MISMATCH"
+[ "$(wc -l < "$tmp/seen" | tr -d ' ')" -eq 17 ] || die "NATIVE_DUPLICATE_COVERAGE"
 printf 'NATIVE_ACCEPTANCE_PASS count=%s source_sha=%s checkout_sha=%s tree_sha=%s compiler_sha256=%s\n' "$count" "$EXPECTED_SOURCE_SHA" "$head" "$tree" "$actual"
