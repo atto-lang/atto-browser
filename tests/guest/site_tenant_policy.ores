@@ -1,0 +1,86 @@
+import fnc {may_place_site_renderer, may_share_site_isolate,
+    may_control_renderer, may_access_origin_resource}
+    from "../../src/isolation/site_tenant_policy.ores";
+
+pub routine main(): void {
+  // www.example.com + api.example.com: same schemeful site tenant=17,
+  // distinct origins=101 and 102 issued by trusted PSL-aware broker.
+  if !may_share_site_isolate(3, 3, 1, 1, 17, 17, 44, 44,
+                             true, true, false, false); do
+    stdio.stdout.write("FAIL:same-site-subdomains"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 1, 17, 18, 44, 44,
+                            true, true, false, false); do
+    stdio.stdout.write("FAIL:cross-site"); return;
+  fi
+  if may_share_site_isolate(3, 4, 1, 1, 17, 17, 44, 44,
+                            true, true, false, false); do
+    stdio.stdout.write("FAIL:cross-window"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 2, 17, 17, 44, 44,
+                            true, true, false, false); do
+    stdio.stdout.write("FAIL:cross-profile"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 1, 17, 17, 44, 45,
+                            true, true, false, false); do
+    stdio.stdout.write("FAIL:cross-partition"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 1, 17, 17, 44, 44,
+                            true, true, false, true); do
+    stdio.stdout.write("FAIL:untrusted-hosted-subdomains"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 1, 17, 17, 44, 44,
+                            true, true, true, false); do
+    stdio.stdout.write("FAIL:origin-keyed-isolation"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 1, 17, 17, 44, 44,
+                            false, true, false, false); do
+    stdio.stdout.write("FAIL:unverified-psl"); return;
+  fi
+  if may_share_site_isolate(3, 3, 1, 1, 17, 17, 44, 44,
+                            true, false, false, false); do
+    stdio.stdout.write("FAIL:unsandboxed-site"); return;
+  fi
+  if !may_place_site_renderer(3, 3, 1, 1, 17, 17, 44, 44,
+                              9, 9, true, true, true, false); do
+    stdio.stdout.write("FAIL:site-placement"); return;
+  fi
+  if may_place_site_renderer(3, 3, 1, 1, 17, 17, 44, 44,
+                             8, 9, true, true, true, false); do
+    stdio.stdout.write("FAIL:stale-renderer-generation"); return;
+  fi
+  if may_place_site_renderer(3, 3, 1, 1, 17, 17, 44, 44,
+                             9, 9, true, true, true, true); do
+    stdio.stdout.write("FAIL:mandatory-split"); return;
+  fi
+  if !may_control_renderer(3, 3, 77, 77, 17, 17, 9, 9,
+                           true, true, true); do
+    stdio.stdout.write("FAIL:one-actor-one-renderer"); return;
+  fi
+  if may_control_renderer(3, 3, 78, 77, 17, 17, 9, 9,
+                          true, true, true); do
+    stdio.stdout.write("FAIL:foreign-renderer-actor"); return;
+  fi
+  if may_control_renderer(3, 3, 77, 77, 17, 17, 8, 9,
+                          true, true, true); do
+    stdio.stdout.write("FAIL:stale-actor"); return;
+  fi
+  if !may_access_origin_resource(1, 1, 101, 101, 44, 44,
+                                 true, true); do
+    stdio.stdout.write("FAIL:same-origin-grant"); return;
+  fi
+  if may_access_origin_resource(1, 1, 101, 102, 44, 44,
+                                true, true); do
+    stdio.stdout.write("FAIL:sibling-origin-read"); return;
+  fi
+  if may_access_origin_resource(1, 1, 101, 101, 44, 45,
+                                true, true); do
+    stdio.stdout.write("FAIL:origin-partition-leak"); return;
+  fi
+  if may_access_origin_resource(1, 1, 101, 101, 44, 44,
+                                true, false); do
+    stdio.stdout.write("FAIL:revoked-origin"); return;
+  fi
+  stdio.stdout.write("browser:site-tenant-policy-ok");
+  return;
+}

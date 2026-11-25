@@ -1,0 +1,157 @@
+import fnc {may_bind_frame_to_renderer,
+    may_reuse_renderer_for_frames,
+    may_attach_child_frame,
+    may_commit_frame_navigation,
+    may_route_frame_message,
+    may_composite_frame_surface,
+    may_retire_unused_renderer}
+    from "../../src/browser/frame_routing_policy.ores";
+
+pub routine main(): void {
+  if !may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 100, 100, 101, 11, 3, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:same-site-main"); return;
+  fi
+  if !may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 200, 200, 102, 11, 1, 502, 4, 4, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:oopif"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 100, 200, 101, 11, 3, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:cross-site-lock"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 2, 2, 2, 7, 7, 100, 100, 101, 11, 3, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:cross-window"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 3, 7, 7, 100, 100, 101, 11, 3, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:cross-profile"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 2, 7, 8, 100, 100, 101, 11, 3, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:cross-partition"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 100, 100, 101, 11, 3, 501, 5, 4, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:stale-process"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 100, 100, 101, 11, 3, 501, 5, 5, true, false, true, true, false); do
+    stdio.stdout.write("FAIL:unsandboxed"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 100, 100, 101, 11, 3, 501, 5, 5, true, true, true, false, false); do
+    stdio.stdout.write("FAIL:incompatible-cluster"); return;
+  fi
+  if may_bind_frame_to_renderer(1, 1, 2, 2, 7, 7, 100, 100, 101, 11, 3, 501, 5, 5, true, true, true, true, true); do
+    stdio.stdout.write("FAIL:origin-strict"); return;
+  fi
+  if !may_reuse_renderer_for_frames(1, 1, 2, 2, 7, 7, 100, 100, 501, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:same-site-cross-tab"); return;
+  fi
+  if may_reuse_renderer_for_frames(1, 1, 2, 2, 7, 7, 100, 200, 501, 501, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:different-site-reuse"); return;
+  fi
+  if may_reuse_renderer_for_frames(1, 1, 2, 2, 7, 7, 100, 100, 501, 502, 5, 5, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:different-renderer"); return;
+  fi
+  if may_reuse_renderer_for_frames(1, 1, 2, 2, 7, 7, 100, 100, 501, 501, 5, 6, true, true, true, true, false); do
+    stdio.stdout.write("FAIL:renderer-restart"); return;
+  fi
+  if may_reuse_renderer_for_frames(1, 1, 2, 2, 7, 7, 100, 100, 501, 501, 5, 5, true, true, true, false, false); do
+    stdio.stdout.write("FAIL:isolation-key"); return;
+  fi
+  if may_reuse_renderer_for_frames(1, 1, 2, 2, 7, 7, 100, 100, 501, 501, 5, 5, true, true, true, true, true); do
+    stdio.stdout.write("FAIL:private-subdomain"); return;
+  fi
+  if !may_attach_child_frame(1, 1, 11, 11, 101, 102, 3, 3, true, true, true); do
+    stdio.stdout.write("FAIL:oopif-parent"); return;
+  fi
+  if may_attach_child_frame(1, 1, 11, 12, 101, 102, 3, 3, true, true, true); do
+    stdio.stdout.write("FAIL:cross-tab-child"); return;
+  fi
+  if may_attach_child_frame(1, 1, 11, 11, 101, 101, 3, 3, true, true, true); do
+    stdio.stdout.write("FAIL:self-parent"); return;
+  fi
+  if may_attach_child_frame(1, 1, 11, 11, 101, 102, 3, 4, true, true, true); do
+    stdio.stdout.write("FAIL:stale-parent"); return;
+  fi
+  if may_attach_child_frame(1, 1, 11, 11, 101, 102, 3, 3, true, false, true); do
+    stdio.stdout.write("FAIL:duplicate-child"); return;
+  fi
+  if may_attach_child_frame(1, 1, 11, 11, 101, 102, 3, 3, true, true, false); do
+    stdio.stdout.write("FAIL:forged-child-ticket"); return;
+  fi
+  if !may_commit_frame_navigation(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:navigation-rebind"); return;
+  fi
+  if may_commit_frame_navigation(1, 1, 11, 11, 102, 102, 4, 5, 501, 501, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-navigation"); return;
+  fi
+  if may_commit_frame_navigation(1, 1, 11, 12, 102, 102, 5, 5, 501, 501, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:wrong-tab-navigation"); return;
+  fi
+  if may_commit_frame_navigation(1, 1, 11, 11, 102, 102, 5, 5, 501, 502, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:wrong-target-renderer"); return;
+  fi
+  if may_commit_frame_navigation(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 3, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-renderer-navigation"); return;
+  fi
+  if may_commit_frame_navigation(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, false, true); do
+    stdio.stdout.write("FAIL:unadmitted-navigation"); return;
+  fi
+  if !may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:cross-site-postmessage"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 301, 5, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:wrong-target-origin"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 4, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-target-document"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 3, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-message-renderer"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, false, true); do
+    stdio.stdout.write("FAIL:untrusted-proxy"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, true, false); do
+    stdio.stdout.write("FAIL:spoofed-broker"); return;
+  fi
+  if !may_composite_frame_surface(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:oopif-surface"); return;
+  fi
+  if may_composite_frame_surface(1, 1, 11, 11, 102, 102, 4, 5, 501, 501, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-frame-surface"); return;
+  fi
+  if may_composite_frame_surface(1, 1, 11, 11, 102, 102, 5, 5, 501, 502, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:wrong-surface-renderer"); return;
+  fi
+  if may_composite_frame_surface(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 3, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:crashed-renderer-surface"); return;
+  fi
+  if may_composite_frame_surface(1, 1, 11, 11, 102, 102, 5, 5, 501, 501, 4, 4, true, true, false, true); do
+    stdio.stdout.write("FAIL:unverified-surface-bounds"); return;
+  fi
+  if !may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 0, true, true); do
+    stdio.stdout.write("FAIL:drained-renderer"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 4, 4, 1, 0, 0, true, true); do
+    stdio.stdout.write("FAIL:live-frame-retirement"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 1, 0, true, true); do
+    stdio.stdout.write("FAIL:inflight-surface-retirement"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 0, false, true); do
+    stdio.stdout.write("FAIL:nonquiescent-retirement"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 0, true, false); do
+    stdio.stdout.write("FAIL:unfinalized-retirement"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 3, 4, 0, 0, 0, true, true); do
+    stdio.stdout.write("FAIL:stale-retire"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 5, 6, 8, 8, 300, 300, 5, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-sender-document"); return;
+  fi
+  if may_route_frame_message(1, 1, 101, 102, 6, 6, 7, 8, 300, 300, 5, 5, 4, 4, true, true, true, true); do
+    stdio.stdout.write("FAIL:stale-sender-process"); return;
+  fi
+  if may_retire_unused_renderer(1, 1, 4, 4, 0, 0, 1, true, true); do
+    stdio.stdout.write("FAIL:inflight-ipc-retirement"); return;
+  fi
+  stdio.stdout.write("browser:frame-routing-policy-ok");
+  return;
+}

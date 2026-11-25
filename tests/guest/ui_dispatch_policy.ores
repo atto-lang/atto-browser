@@ -1,0 +1,42 @@
+import fnc {may_dispatch_ui_command} from "../../src/desktop/ui_dispatch_policy.ores";
+
+pub routine main(): void {
+  if !may_dispatch_ui_command(1, 1, 1, 0, 0, 0, 0, true, true, false); do
+    stdio.stdout.write("FAIL:create"); return;
+  fi
+  if may_dispatch_ui_command(1, 1, 2, 0, 0, 0, 0, true, true, false); do
+    stdio.stdout.write("FAIL:cross-tenant-create"); return;
+  fi
+  if may_dispatch_ui_command(1, 1, 1, 0, 0, 0, 0, false, true, false); do
+    stdio.stdout.write("FAIL:untrusted-create"); return;
+  fi
+  if may_dispatch_ui_command(1, 1, 1, 9, 1, 2, 2, true, true, true); do
+    stdio.stdout.write("FAIL:unexpected-id-create"); return;
+  fi
+  if !may_dispatch_ui_command(4, 1, 1, 9, 1, 2, 2, true, true, true); do
+    stdio.stdout.write("FAIL:navigate"); return;
+  fi
+  if may_dispatch_ui_command(4, 1, 1, 9, 1, 1, 2, true, true, true); do
+    stdio.stdout.write("FAIL:stale-tab"); return;
+  fi
+  if may_dispatch_ui_command(4, 1, 1, 9, 2, 2, 2, true, true, true); do
+    stdio.stdout.write("FAIL:wrong-tab-tenant"); return;
+  fi
+  if may_dispatch_ui_command(4, 1, 1, 9, 1, 2, 2, true, true, false); do
+    stdio.stdout.write("FAIL:closed-tab"); return;
+  fi
+  if may_dispatch_ui_command(10, 1, 1, 9, 1, 2, 2, true, true, true); do
+    stdio.stdout.write("FAIL:unknown-op"); return;
+  fi
+  if !may_dispatch_ui_command(8, 1, 1, 9, 1, 2, 2, true, true, true); do
+    stdio.stdout.write("FAIL:next-tab"); return;
+  fi
+  if !may_dispatch_ui_command(9, 1, 1, 9, 1, 2, 2, true, true, true); do
+    stdio.stdout.write("FAIL:previous-tab"); return;
+  fi
+  if may_dispatch_ui_command(4, 1, 1, 9, 1, 2, 2, true, false, true); do
+    stdio.stdout.write("FAIL:closed-session"); return;
+  fi
+  stdio.stdout.write("browser:ui-ffi-policy-ok");
+  return;
+}
