@@ -1,18 +1,49 @@
-name: Native Oreslang guest acceptance (manual, fail closed)
+name: Native Oreslang guest acceptance (compiler-backed, fail closed)
 on:
+  pull_request:
+    paths:
+      - 'src/browser/**'
+      - 'src/desktop/**'
+      - 'src/isolation/**'
+      - 'src/notifications/**'
+      - 'src/workers/**'
+      - 'tests/guest/**'
+      - 'ci/native-cases.txt'
+      - 'ci/verify-native.sh'
+      - '.github/workflows/native-guest.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   native-guest:
-    runs-on: ubuntu-latest
+    # Never run a fork PR's untrusted checkout with private runtime access.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # pinned v4.2.2
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Exact SHA native guest acceptance
+      - name: Verify exact guest source SHA and tree
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse --verify HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          tree="$(git rev-parse --verify 'HEAD^{tree}')"
+          [[ "$tree" =~ ^[0-9a-f]{40}$ ]]
+          printf 'NATIVE_GUEST_SOURCE_IDENTITY source_sha=%s tree_sha=%s\n' "$EXPECTED_HEAD" "$tree"
+      - name: Execute all exact native guest cases through pinned compiler
+        shell: bash
         env:
           ORESLANG_BIN: ${{ vars.ORESLANG_BIN }}
           ORESLANG_COMPILER_SHA256: ${{ vars.ORESLANG_COMPILER_SHA256 }}
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
-        run: sh ci/verify-native.sh
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          sh -n ci/verify-native.sh
+          sh ci/verify-native.sh

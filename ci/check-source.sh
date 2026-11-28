@@ -3,10 +3,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f ci/native-cases.txt ]
-[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 14 ]
+[ "$(grep -c '^[^#].*|browser:' ci/native-cases.txt)" -eq 17 ]
 for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
     src/browser/renderer_supervisor.ores src/browser/browser_supervisor.ores \
     src/browser/window_frame_graph.ores src/browser/frame_routing_policy.ores \
+    src/browser/session_lifecycle.ores src/browser/frame_registry.ores src/browser/window_frame_registry_actor.ores \
     src/browser/tab_epoch.ores \
     src/desktop/tab_policy.ores src/desktop/ui_dispatch_policy.ores \
     src/desktop/tab_session.ores \
@@ -15,6 +16,7 @@ for file in src/isolation/policy.ores src/isolation/site_tenant_policy.ores \
     src/workers/service_worker_policy.ores src/workers/lifecycle.ores \
     tests/guest/isolation_policy.ores tests/guest/site_tenant_policy.ores \
     tests/guest/frame_routing_policy.ores \
+    tests/guest/dynamic_frame_registry.ores \
     tests/guest/tab_policy.ores \
     tests/guest/ui_dispatch_policy.ores \
     tests/guest/notification_policy.ores tests/guest/service_worker_policy.ores; do
@@ -56,6 +58,7 @@ grep -Fq 'FAIL:sibling-origin-read' tests/guest/site_tenant_policy.ores
 # These source checks are structural only; compilation is a separate gate.
 for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     src/browser/window_frame_graph.ores \
+    src/browser/session_lifecycle.ores src/browser/window_frame_registry_actor.ores \
     src/browser/renderer_supervisor.ores src/desktop/tab_session.ores \
     src/desktop/window_tab_strip.ores src/workers/lifecycle.ores; do
   [ "$(grep -Ec '^  state \{' "$actor")" -eq 1 ] || {
@@ -67,19 +70,39 @@ for actor in src/browser/tab_epoch.ores src/browser/browser_supervisor.ores \
     echo "MISSING_STATE_EFFECT_DECLARATION: $actor" >&2
     exit 1
   }
-  if grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' "$actor" |
+  # Only inspect actor declarations: an ordinary DTO class constructor may
+  # assign its own fields, but actor state must still use handle_state.
+  actor_body=$(awk '/^define (pub )?actor / { inside=1 } inside { print } /^end[[:space:]]*$/ { inside=0 }' "$actor")
+  [ -n "$actor_body" ] || { echo "MISSING_ACTOR_DECLARATION: $actor" >&2; exit 1; }
+  if printf '%s\n' "$actor_body" | grep -E 'self\.[A-Za-z_][A-Za-z_0-9]*' |
        grep -Ev 'self\.(send|end|handle_state|handle_operation|apply_epoch)\('; then
     echo "DIRECT_ACTOR_FIELD_ACCESS: $actor" >&2
     exit 1
   fi
-  if grep -Eq 'self\.[A-Za-z_][A-Za-z_0-9]*[[:space:]]*=' "$actor"; then
+  if printf '%s\n' "$actor_body" | grep -Eq 'self\.[A-Za-z_][A-Za-z_0-9]*[[:space:]]*='; then
     echo "DIRECT_ACTOR_FIELD_WRITE: $actor" >&2
     exit 1
   fi
 done
+grep -Fq 'define module frame_registry as' src/browser/frame_registry.ores
+grep -Fq 'pub fnc attach_frame(mut self)' src/browser/frame_registry.ores
+grep -Fq 'pub fnc close_subtree(mut self)' src/browser/frame_registry.ores
+grep -Fq 'TWO PHASES: compute descendants' src/browser/frame_registry.ores
+grep -Fq 'pub fnc crash_process(mut self)' src/browser/frame_registry.ores
+grep -Fq 'pub can_retire(' src/browser/frame_registry.ores
+grep -Fq 'define actor WindowFrameRegistryActor' src/browser/window_frame_registry_actor.ores
+for term in three-deep-subtree shared-renderer-other-tab \
+    tombstone-reuse-without-id-recycling crash-recovery \
+    duplicate-process-or-actor; do
+  grep -Fq "FAIL:$term" tests/guest/dynamic_frame_registry.ores
+done
+grep -Fq 'FAIL:actor-other-window-leak' src/browser/window_frame_registry_actor.ores
 grep -Fq 'FAIL:stale-child-surface' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:cross-tab-damage' src/browser/window_frame_graph.ores
 grep -Fq 'FAIL:stale-tab-id' src/browser/browser_supervisor.ores
+grep -Fq 'FAIL:stale-session-close' src/browser/session_lifecycle.ores
+grep -Fq 'FAIL:cross-session-retirement' src/browser/session_lifecycle.ores
+grep -Fq 'FAIL:recycled-session-generation' src/browser/session_lifecycle.ores
 grep -Fq 'FAIL:nonrecycled-tab-id' src/browser/browser_supervisor.ores
 grep -Fq 'define actor TabEpochActor' src/browser/tab_epoch.ores
 grep -Fq 'define actor TabSessionActor' src/desktop/tab_session.ores

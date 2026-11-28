@@ -124,3 +124,20 @@ See [MULTI_RENDERER_TABS.md](MULTI_RENDERER_TABS.md). Native compilation,
 real OOPIF OS processes, renderer IsolateVM, IPC and compositor remain
 unverified/unimplemented. Total manifest count is **14**; a zero-step
 CI run must not be called a passed test.
+
+## Dynamic WindowFrameRegistryActor milestone (new PR)
+
+The fixed two-tab/three-frame actor example is retained as a minimal
+cross-site OOPIF fixture. A new dynamic array-backed Oreslang
+`frame_registry.Registry` with Oreslang `WindowFrameRegistryActor` wrapper
+adds bounded live-frame admission (64), renderer/actor uniqueness, parent
+checks, epoch-fenced navigation, two-phase subtree deletion, renderer
+reference counts, drain pins and crash/rebind semantics. The new native
+guest manifest includes **16** acceptance programs. The module is
+allocation-backed and O(n) or worse on operations; no preallocated
+arena, authenticated IPC, process launcher or compositor yet.
+See [DYNAMIC_FRAME_REGISTRY.md](DYNAMIC_FRAME_REGISTRY.md).
+
+## Combined native prototype gate
+
+The session lifecycle actor from #30 is preserved with the native registry work, not enabled by the Qt host integration. The combined manifest requires 17 exact-source cases; actual native compiler execution and backend integration remain separate outstanding gates.

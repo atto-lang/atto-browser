@@ -1,0 +1,152 @@
+import module frame_registry from "../../src/browser/frame_registry";
+
+// Source-level native acceptance for dynamic frame/renderer admission.
+// All IDs are issued by trusted fixture code. This is NOT physical OS IPC,
+// tenant authorization, a compositor or a page renderer.
+pub routine main(): void {
+  let mut frame_registry.Registry reg = new frame_registry.Registry(1, 1, 1);
+  if !reg.register_process(10, 1, 100, 1000, 0); then
+    stdio.stdout.write("FAIL:register-main"); return;
+  fi
+  if !reg.register_process(20, 1, 200, 2000, 2200); then
+    stdio.stdout.write("FAIL:register-oopif"); return;
+  fi
+  if reg.register_process(10, 2, 100, 1001, 0) ||
+     reg.register_process(30, 1, 300, 1000, 0); then
+    stdio.stdout.write("FAIL:duplicate-process-or-actor"); return;
+  fi
+  if reg.permits_renderer(20, 1, 200, 2201) ||
+     reg.permits_renderer(10, 2, 100, 1100); then
+    stdio.stdout.write("FAIL:origin-lock-or-stale-process"); return;
+  fi
+
+  val int root_a = reg.attach_frame(11, 0, 10, 1, 100, 1100);
+  val int child = reg.attach_frame(11, root_a, 20, 1, 200, 2200);
+  val int grandchild = reg.attach_frame(11, child, 20, 1, 200, 2200);
+  val int root_b = reg.attach_frame(12, 0, 10, 1, 100, 1101);
+  if root_a != 1 || child != 2 || grandchild != 3 ||
+     root_b != 4 || reg.reference_count(10) != 2 ||
+     reg.reference_count(20) != 2; then
+    stdio.stdout.write("FAIL:multi-renderer-two-tab"); return;
+  fi
+  if reg.attach_frame(12, 0, 10, 1, 100, 1101) != -1 ||
+     reg.attach_frame(12, child, 10, 1, 100, 1100) != -1 ||
+     reg.attach_frame(11, child, 20, 1, 200, 2201) != -1; then
+    stdio.stdout.write("FAIL:root-or-parent-or-origin"); return;
+  fi
+  if !reg.accepts_surface(child, 1, 20, 1); then
+    stdio.stdout.write("FAIL:live-oopif-surface"); return;
+  fi
+  val int before = reg.revision_number();
+  if reg.commit_navigation(child, 2, 10, 1, 100, 1100) ||
+     reg.revision_number() != before; then
+    stdio.stdout.write("FAIL:stale-nav-mutated"); return;
+  fi
+  if !reg.commit_navigation(child, 1, 10, 1, 100, 1100) ||
+     reg.frame_epoch(child) != 2 ||
+     reg.frame_renderer(child) != 10 ||
+     reg.reference_count(10) != 3 ||
+     reg.reference_count(20) != 1; then
+    stdio.stdout.write("FAIL:atomic-site-swap"); return;
+  fi
+  if reg.accepts_surface(child, 1, 20, 1) ||
+     reg.accepts_surface(child, 1, 10, 1) ||
+     !reg.accepts_surface(child, 2, 10, 1); then
+    stdio.stdout.write("FAIL:stale-surface-after-swap"); return;
+  fi
+
+  // An inactive renderer with in-flight IPC and surfaces cannot retire.
+  if !reg.pin_ipc(20, 1) || !reg.pin_surface(20, 1); then
+    stdio.stdout.write("FAIL:inflight-pins"); return;
+  fi
+  if reg.close_subtree(root_a, 2) != -1; then
+    stdio.stdout.write("FAIL:stale-close"); return;
+  fi
+  if reg.close_subtree(root_a, 1) != 3 ||
+     reg.find_frame(child) != -1 ||
+     reg.find_frame(grandchild) != -1 ||
+     reg.reference_count(10) != 1 ||
+     reg.reference_count(20) != 0; then
+    stdio.stdout.write("FAIL:three-deep-subtree"); return;
+  fi
+  if reg.can_retire(20, 1) || reg.retire_process(20, 1, true); then
+    stdio.stdout.write("FAIL:early-retirement"); return;
+  fi
+  if !reg.settle_ipc(20, 1) || !reg.settle_surface(20, 1) ||
+     reg.settle_ipc(20, 1); then
+    stdio.stdout.write("FAIL:pin-settle"); return;
+  fi
+  if !reg.can_retire(20, 1) ||
+     reg.retire_process(20, 1, false) ||
+     !reg.retire_process(20, 1, true) ||
+     reg.register_process(20, 2, 200, 2222, 0); then
+    stdio.stdout.write("FAIL:retirement-replay"); return;
+  fi
+  if reg.can_retire(10, 1) || reg.reference_count(10) != 1 ||
+     reg.frame_renderer(root_b) != 10; then
+    stdio.stdout.write("FAIL:shared-renderer-other-tab"); return;
+  fi
+  if reg.close_subtree(root_b, 1) != 1 ||
+     !reg.can_retire(10, 1) ||
+     !reg.retire_process(10, 1, true); then
+    stdio.stdout.write("FAIL:last-tab-retire"); return;
+  fi
+
+  // Crash: any frame on the dead renderer loses its old process binding
+  // and increments document generation. The old renderer ID never returns.
+  if !reg.register_process(30, 1, 300, 3000, 0); then
+    stdio.stdout.write("FAIL:new-site-process"); return;
+  fi
+  val int crash_frame = reg.attach_frame(13, 0, 30, 1, 300, 3300);
+  if crash_frame != 5 ||
+     reg.crash_process(30, 1, false) != -1 ||
+     reg.crash_process(30, 2, true) != -1 ||
+     !reg.accepts_surface(crash_frame, 1, 30, 1); then
+    stdio.stdout.write("FAIL:crash-ticket"); return;
+  fi
+  if reg.crash_process(30, 1, true) != 1 ||
+     reg.accepts_surface(crash_frame, 1, 30, 1) ||
+     reg.frame_epoch(crash_frame) != 2 ||
+     reg.frame_renderer(crash_frame) != 0; then
+    stdio.stdout.write("FAIL:crash-invalidation"); return;
+  fi
+  if !reg.register_process(31, 1, 300, 3100, 0) ||
+     !reg.commit_navigation(crash_frame, 2, 31, 1, 300, 3300) ||
+     reg.commit_navigation(crash_frame, 2, 31, 1, 300, 3300) ||
+     !reg.accepts_surface(crash_frame, 3, 31, 1); then
+    stdio.stdout.write("FAIL:crash-recovery"); return;
+  fi
+  if reg.close_subtree(crash_frame, 3) != 1; then
+    stdio.stdout.write("FAIL:crash-frame-close"); return;
+  fi
+
+  // Many roots are dynamic entries, not a special 2-tab, 3-frame switch.
+  let mut frame_registry.Registry bounded =
+    new frame_registry.Registry(2, 1, 1);
+  if !bounded.register_process(100, 1, 100, 999, 0); then
+    stdio.stdout.write("FAIL:bounded-process"); return;
+  fi
+  for (let i = 0; i < 64; i++) {
+    if bounded.attach_frame(1000 + i, 0, 100, 1, 100, 1100) !=
+       i + 1; then
+      stdio.stdout.write("FAIL:dynamic-capacity"); return;
+    fi
+  }
+  if bounded.live_frames() != 64 ||
+     bounded.attach_frame(5000, 0, 100, 1, 100, 1100) != -1; then
+    stdio.stdout.write("FAIL:live-frame-budget"); return;
+  fi
+  if bounded.close_subtree(1, 1) != 1 ||
+     bounded.attach_frame(5000, 0, 100, 1, 100, 1100) != 65 ||
+     bounded.frame_total_slots() != 64; then
+    stdio.stdout.write("FAIL:tombstone-reuse-without-id-recycling"); return;
+  fi
+  let mut frame_registry.Registry independent =
+    new frame_registry.Registry(3, 1, 1);
+  if independent.live_frames() != 0 ||
+     independent.find_process(100) != -1; then
+    stdio.stdout.write("FAIL:cross-window-registry"); return;
+  fi
+  stdio.stdout.write("browser:dynamic-frame-registry-ok");
+  return;
+}

@@ -258,3 +258,24 @@ effects are **not implemented by this preview**. Existing scalar/worker
 messages do not certify object-graph transfer, and token generation fencing
 alone does not prove deep-copy or provenance safety.
 
+## P0 dynamic window frame registry (unverified native source)
+
+The new `src/browser/frame_registry.ores` is a bounded, mutable Oreslang
+registry with dynamic frame/renderer tables (64 simultaneous frames,
+32 active renderer process records), never-recycled logical frame and
+renderer IDs, cross-tab renderer sharing, origin-strict process locks,
+parent/depth checks, staged navigation commits, crash fencing, safe
+two-phase subtree deletion, and derived renderer reference counts.
+`src/browser/window_frame_registry_actor.ores` wraps this under a single
+actor's sealed state and `handle_state(critical)` transactions.
+Its integer command packets are trusted LOCAL fixture-only, not actual
+renderer IPC or the Qt ABI. A real ProfileBroker and OS launcher have
+not been implemented.
+
+The guest acceptance manifest is now **16** source pairs, including
+dynamic frame registry, crash/restart and 64-frame limit vectors.
+See [P0 registry implementation status](docs/DYNAMIC_FRAME_REGISTRY.md).
+No actual Oreslang compiler execution was observed when authored;
+the PR must stay draft until executable, exact-SHA proof is recorded.
+
+The native session lifecycle prototype from #30 is retained here with the frame registry. The combined native acceptance manifest has 17 cases, all still requiring actual compiler execution.
